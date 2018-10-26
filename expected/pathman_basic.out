@@ -1,0 +1,1869 @@
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA test;
+CREATE TABLE test.hash_rel (
+	id		SERIAL PRIMARY KEY,
+	value	INTEGER);
+INSERT INTO test.hash_rel VALUES (1, 1);
+INSERT INTO test.hash_rel VALUES (2, 2);
+INSERT INTO test.hash_rel VALUES (3, 3);
+\set VERBOSITY default
+SELECT _gogu.create_hash_partitions('test.hash_rel', 'value', 3);
+ERROR:  failed to analyze partitioning expression "value"
+DETAIL:  column "value" should be marked NOT NULL
+CONTEXT:  SQL statement "SELECT _gogu.validate_expression(parent_relid, expression)"
+PL/pgSQL function prepare_for_partitioning(regclass,text,boolean) line 9 at PERFORM
+SQL statement "SELECT _gogu.prepare_for_partitioning(parent_relid,
+												 expression,
+												 partition_data)"
+PL/pgSQL function create_hash_partitions(regclass,text,integer,boolean,text[],text[]) line 3 at PERFORM
+\set VERBOSITY terse
+ALTER TABLE test.hash_rel ALTER COLUMN value SET NOT NULL;
+SELECT _gogu.create_hash_partitions('test.hash_rel', 'value', 3, partition_data:=false);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on hash_rel
+   ->  Seq Scan on _test_0_hash_rel
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(5 rows)
+
+SELECT * FROM test.hash_rel;
+ id | value 
+----+-------
+  1 |     1
+  2 |     2
+  3 |     3
+(3 rows)
+
+SELECT _gogu.set_enable_parent('test.hash_rel', false);
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_0_hash_rel
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(4 rows)
+
+SELECT * FROM test.hash_rel;
+ id | value 
+----+-------
+(0 rows)
+
+SELECT _gogu.set_enable_parent('test.hash_rel', true);
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on hash_rel
+   ->  Seq Scan on _test_0_hash_rel
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(5 rows)
+
+SELECT * FROM test.hash_rel;
+ id | value 
+----+-------
+  1 |     1
+  2 |     2
+  3 |     3
+(3 rows)
+
+SELECT _gogu.drop_partitions('test.hash_rel');
+NOTICE:  0 rows copied from gogudb_partition_table._test_0_hash_rel
+NOTICE:  0 rows copied from gogudb_partition_table._test_1_hash_rel
+NOTICE:  0 rows copied from gogudb_partition_table._test_2_hash_rel
+ drop_partitions 
+-----------------
+               3
+(1 row)
+
+SELECT _gogu.create_hash_partitions('test.hash_rel', 'Value', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+SELECT COUNT(*) FROM test.hash_rel;
+ count 
+-------
+     3
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.hash_rel;
+ count 
+-------
+     0
+(1 row)
+
+INSERT INTO test.hash_rel VALUES (4, 4);
+INSERT INTO test.hash_rel VALUES (5, 5);
+INSERT INTO test.hash_rel VALUES (6, 6);
+SELECT COUNT(*) FROM test.hash_rel;
+ count 
+-------
+     6
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.hash_rel;
+ count 
+-------
+     0
+(1 row)
+
+CREATE TABLE test.range_rel (
+	id	SERIAL PRIMARY KEY,
+	dt	TIMESTAMP,
+	txt	TEXT);
+CREATE INDEX ON test.range_rel (dt);
+INSERT INTO test.range_rel (dt, txt)
+SELECT g, md5(g::TEXT) FROM generate_series('2015-01-01', '2015-04-30', '1 day'::interval) as g;
+\set VERBOSITY default
+SELECT _gogu.create_range_partitions('test.range_rel', 'dt', '2015-01-01'::DATE, '1 month'::INTERVAL);
+ERROR:  failed to analyze partitioning expression "dt"
+DETAIL:  column "dt" should be marked NOT NULL
+CONTEXT:  SQL statement "SELECT _gogu.validate_expression(parent_relid, expression)"
+PL/pgSQL function prepare_for_partitioning(regclass,text,boolean) line 9 at PERFORM
+SQL statement "SELECT _gogu.prepare_for_partitioning(parent_relid,
+												 expression,
+												 partition_data)"
+PL/pgSQL function create_range_partitions(regclass,text,anyelement,interval,integer,boolean) line 12 at PERFORM
+\set VERBOSITY terse
+ALTER TABLE test.range_rel ALTER COLUMN dt SET NOT NULL;
+SELECT _gogu.create_range_partitions('test.range_rel', 'dt', '2015-01-01'::DATE, '1 month'::INTERVAL, 2);
+ERROR:  not enough partitions to fit all values of "dt"
+SELECT _gogu.create_range_partitions('test.range_rel', 'DT', '2015-01-01'::DATE, '1 month'::INTERVAL);
+ create_range_partitions 
+-------------------------
+                       4
+(1 row)
+
+SELECT COUNT(*) FROM test.range_rel;
+ count 
+-------
+   120
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.range_rel;
+ count 
+-------
+     0
+(1 row)
+
+CREATE TABLE test.num_range_rel (
+	id	SERIAL PRIMARY KEY,
+	txt	TEXT);
+SELECT _gogu.create_range_partitions('test.num_range_rel', 'id', 0, 1000, 4);
+ create_range_partitions 
+-------------------------
+                       4
+(1 row)
+
+SELECT COUNT(*) FROM test.num_range_rel;
+ count 
+-------
+     0
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.num_range_rel;
+ count 
+-------
+     0
+(1 row)
+
+INSERT INTO test.num_range_rel
+	SELECT g, md5(g::TEXT) FROM generate_series(1, 3000) as g;
+SELECT COUNT(*) FROM test.num_range_rel;
+ count 
+-------
+  3000
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.num_range_rel;
+ count 
+-------
+     0
+(1 row)
+
+/* since rel_1_2_beta: check append_child_relation(), make_ands_explicit(), dummy path */
+CREATE TABLE test.improved_dummy (id BIGSERIAL, name TEXT NOT NULL);
+INSERT INTO test.improved_dummy (name) SELECT md5(g::TEXT) FROM generate_series(1, 100) as g;
+SELECT _gogu.create_range_partitions('test.improved_dummy', 'id', 1, 10);
+ create_range_partitions 
+-------------------------
+                      10
+(1 row)
+
+INSERT INTO test.improved_dummy (name) VALUES ('test'); /* spawns new partition */
+EXPLAIN (COSTS OFF) SELECT * FROM test.improved_dummy WHERE id = 101 OR id = 5 AND name = 'ib';
+                     QUERY PLAN                     
+----------------------------------------------------
+ Append
+   ->  Seq Scan on _test_1_improved_dummy
+         Filter: ((id = 5) AND (name = 'ib'::text))
+   ->  Seq Scan on _test_11_improved_dummy
+         Filter: (id = 101)
+(5 rows)
+
+SELECT _gogu.set_enable_parent('test.improved_dummy', true); /* enable parent */
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.improved_dummy WHERE id = 101 OR id = 5 AND name = 'ib';
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Append
+   ->  Seq Scan on improved_dummy
+         Filter: ((id = 101) OR ((id = 5) AND (name = 'ib'::text)))
+   ->  Seq Scan on _test_1_improved_dummy
+         Filter: ((id = 5) AND (name = 'ib'::text))
+   ->  Seq Scan on _test_11_improved_dummy
+         Filter: (id = 101)
+(7 rows)
+
+SELECT _gogu.set_enable_parent('test.improved_dummy', false); /* disable parent */
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+ALTER TABLE gogudb_partition_table._test_1_improved_dummy ADD CHECK (name != 'ib'); /* make test.improved_dummy_1 disappear */
+EXPLAIN (COSTS OFF) SELECT * FROM test.improved_dummy WHERE id = 101 OR id = 5 AND name = 'ib';
+                QUERY PLAN                 
+-------------------------------------------
+ Append
+   ->  Seq Scan on _test_11_improved_dummy
+         Filter: (id = 101)
+(3 rows)
+
+SELECT _gogu.set_enable_parent('test.improved_dummy', true); /* enable parent */
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.improved_dummy WHERE id = 101 OR id = 5 AND name = 'ib';
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Append
+   ->  Seq Scan on improved_dummy
+         Filter: ((id = 101) OR ((id = 5) AND (name = 'ib'::text)))
+   ->  Seq Scan on _test_11_improved_dummy
+         Filter: (id = 101)
+(5 rows)
+
+DROP TABLE test.improved_dummy CASCADE;
+NOTICE:  drop cascades to 12 other objects
+/* since rel_1_4_beta: check create_range_partitions(bounds array) */
+CREATE TABLE test.improved_dummy (val INT NOT NULL);
+SELECT _gogu.create_range_partitions('test.improved_dummy', 'val',
+									   _gogu.generate_range_bounds(1, 1, 2));
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+SELECT * FROM _gogu.gogudb_partition_list
+WHERE parent = 'test.improved_dummy'::REGCLASS
+ORDER BY partition;
+       parent        |                   partition                   | parttype | expr | range_min | range_max 
+---------------------+-----------------------------------------------+----------+------+-----------+-----------
+ test.improved_dummy | gogudb_partition_table._test_1_improved_dummy |        2 | val  | 1         | 2
+ test.improved_dummy | gogudb_partition_table._test_2_improved_dummy |        2 | val  | 2         | 3
+(2 rows)
+
+SELECT _gogu.drop_partitions('test.improved_dummy');
+NOTICE:  0 rows copied from gogudb_partition_table._test_1_improved_dummy
+NOTICE:  0 rows copied from gogudb_partition_table._test_2_improved_dummy
+ drop_partitions 
+-----------------
+               2
+(1 row)
+
+SELECT _gogu.create_range_partitions('test.improved_dummy', 'val',
+									   _gogu.generate_range_bounds(1, 1, 2),
+									   partition_names := '{p1, p2}');
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+SELECT * FROM _gogu.gogudb_partition_list
+WHERE parent = 'test.improved_dummy'::REGCLASS
+ORDER BY partition;
+       parent        | partition | parttype | expr | range_min | range_max 
+---------------------+-----------+----------+------+-----------+-----------
+ test.improved_dummy | p1        |        2 | val  | 1         | 2
+ test.improved_dummy | p2        |        2 | val  | 2         | 3
+(2 rows)
+
+SELECT _gogu.drop_partitions('test.improved_dummy');
+NOTICE:  0 rows copied from p1
+NOTICE:  0 rows copied from p2
+ drop_partitions 
+-----------------
+               2
+(1 row)
+
+SELECT _gogu.create_range_partitions('test.improved_dummy', 'val',
+									   _gogu.generate_range_bounds(1, 1, 2),
+									   partition_names := '{p1, p2}',
+									   tablespaces := '{pg_default, pg_default}');
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+SELECT * FROM _gogu.gogudb_partition_list
+WHERE parent = 'test.improved_dummy'::REGCLASS
+ORDER BY partition;
+       parent        | partition | parttype | expr | range_min | range_max 
+---------------------+-----------+----------+------+-----------+-----------
+ test.improved_dummy | p1        |        2 | val  | 1         | 2
+ test.improved_dummy | p2        |        2 | val  | 2         | 3
+(2 rows)
+
+DROP TABLE test.improved_dummy CASCADE;
+NOTICE:  drop cascades to 3 other objects
+/* Test _gogu.rel_pathlist_hook() with INSERT query */
+CREATE TABLE test.insert_into_select(val int NOT NULL);
+INSERT INTO test.insert_into_select SELECT generate_series(1, 100);
+SELECT _gogu.create_range_partitions('test.insert_into_select', 'val', 1, 20);
+ create_range_partitions 
+-------------------------
+                       5
+(1 row)
+
+CREATE TABLE test.insert_into_select_copy (LIKE test.insert_into_select); /* INSERT INTO ... SELECT ... */
+EXPLAIN (COSTS OFF)
+INSERT INTO test.insert_into_select_copy
+SELECT * FROM test.insert_into_select
+WHERE val <= 80;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Insert on insert_into_select_copy
+   ->  Append
+         ->  Seq Scan on _test_1_insert_into_select
+         ->  Seq Scan on _test_2_insert_into_select
+         ->  Seq Scan on _test_3_insert_into_select
+         ->  Seq Scan on _test_4_insert_into_select
+               Filter: (val <= 80)
+(7 rows)
+
+SELECT _gogu.set_enable_parent('test.insert_into_select', true);
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF)
+INSERT INTO test.insert_into_select_copy
+SELECT * FROM test.insert_into_select
+WHERE val <= 80;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Insert on insert_into_select_copy
+   ->  Append
+         ->  Seq Scan on insert_into_select
+               Filter: (val <= 80)
+         ->  Seq Scan on _test_1_insert_into_select
+         ->  Seq Scan on _test_2_insert_into_select
+         ->  Seq Scan on _test_3_insert_into_select
+         ->  Seq Scan on _test_4_insert_into_select
+               Filter: (val <= 80)
+(9 rows)
+
+INSERT INTO test.insert_into_select_copy SELECT * FROM test.insert_into_select;
+SELECT count(*) FROM test.insert_into_select_copy;
+ count 
+-------
+   100
+(1 row)
+
+DROP TABLE test.insert_into_select_copy, test.insert_into_select CASCADE;
+NOTICE:  drop cascades to 6 other objects
+/*SET pg__gogu.enable_runtimeappend = OFF;
+SET pg__gogu.enable_runtimemergeappend = OFF;
+*/
+VACUUM;
+SET enable_indexscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_seqscan = ON;
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_0_hash_rel
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE false;
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE value = NULL;
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE value = 2;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_2_hash_rel
+         Filter: (value = 2)
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE 2 = value; /* test commutator */
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_2_hash_rel
+         Filter: (2 = value)
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE value = 2 OR value = 1;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_1_hash_rel
+         Filter: (value = 1)
+   ->  Seq Scan on _test_2_hash_rel
+         Filter: (value = 2)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE 2500 = id; /* test commutator */
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_3_num_range_rel
+         Filter: (2500 = id)
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE 2500 < id; /* test commutator */
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_3_num_range_rel
+         Filter: (2500 < id)
+   ->  Seq Scan on _test_4_num_range_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id > 2500;
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_3_num_range_rel
+         Filter: (id > 2500)
+   ->  Seq Scan on _test_4_num_range_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id >= 1000 AND id < 3000;
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_2_num_range_rel
+   ->  Seq Scan on _test_3_num_range_rel
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id >= 1500 AND id < 2500;
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_2_num_range_rel
+         Filter: (id >= 1500)
+   ->  Seq Scan on _test_3_num_range_rel
+         Filter: (id < 2500)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE (id >= 500 AND id < 1500) OR (id > 2500);
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_1_num_range_rel
+         Filter: (id >= 500)
+   ->  Seq Scan on _test_2_num_range_rel
+         Filter: (id < 1500)
+   ->  Seq Scan on _test_3_num_range_rel
+         Filter: (id > 2500)
+   ->  Seq Scan on _test_4_num_range_rel
+(8 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt > '2015-02-15';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_2_range_rel
+         Filter: (dt > 'Sun Feb 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_3_range_rel
+   ->  Seq Scan on _test_4_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE '2015-02-15' < dt; /* test commutator */
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_2_range_rel
+         Filter: ('Sun Feb 15 00:00:00 2015'::timestamp without time zone < dt)
+   ->  Seq Scan on _test_3_range_rel
+   ->  Seq Scan on _test_4_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt >= '2015-02-01' AND dt < '2015-03-01';
+             QUERY PLAN              
+-------------------------------------
+ Append
+   ->  Seq Scan on _test_2_range_rel
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt >= '2015-02-15' AND dt < '2015-03-15';
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_2_range_rel
+         Filter: (dt >= 'Sun Feb 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_3_range_rel
+         Filter: (dt < 'Sun Mar 15 00:00:00 2015'::timestamp without time zone)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE (dt >= '2015-01-15' AND dt < '2015-02-15') OR (dt > '2015-03-15');
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_1_range_rel
+         Filter: (dt >= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_2_range_rel
+         Filter: (dt < 'Sun Feb 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_3_range_rel
+         Filter: (dt > 'Sun Mar 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_4_range_rel
+(8 rows)
+
+SET enable_indexscan = ON;
+SET enable_bitmapscan = OFF;
+SET enable_seqscan = OFF;
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_0_hash_rel
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE false;
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE value = NULL;
+        QUERY PLAN        
+--------------------------
+ Result
+   One-Time Filter: false
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE value = 2;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_2_hash_rel
+         Filter: (value = 2)
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE 2 = value; /* test commutator */
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_2_hash_rel
+         Filter: (2 = value)
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE value = 2 OR value = 1;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on _test_1_hash_rel
+         Filter: (value = 1)
+   ->  Seq Scan on _test_2_hash_rel
+         Filter: (value = 2)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE 2500 = id; /* test commutator */
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+         Index Cond: (2500 = id)
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE 2500 < id; /* test commutator */
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+         Index Cond: (2500 < id)
+   ->  Seq Scan on _test_4_num_range_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id > 2500;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+         Index Cond: (id > 2500)
+   ->  Seq Scan on _test_4_num_range_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id >= 1000 AND id < 3000;
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_2_num_range_rel
+   ->  Seq Scan on _test_3_num_range_rel
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id >= 1500 AND id < 2500;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_2_num_range_rel_pkey on _test_2_num_range_rel
+         Index Cond: (id >= 1500)
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+         Index Cond: (id < 2500)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE (id >= 500 AND id < 1500) OR (id > 2500);
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_num_range_rel_pkey on _test_1_num_range_rel
+         Index Cond: (id >= 500)
+   ->  Index Scan using _test_2_num_range_rel_pkey on _test_2_num_range_rel
+         Index Cond: (id < 1500)
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+         Index Cond: (id > 2500)
+   ->  Seq Scan on _test_4_num_range_rel
+(8 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel ORDER BY id;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_num_range_rel_pkey on _test_1_num_range_rel
+   ->  Index Scan using _test_2_num_range_rel_pkey on _test_2_num_range_rel
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+   ->  Index Scan using _test_4_num_range_rel_pkey on _test_4_num_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id <= 2500 ORDER BY id;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_num_range_rel_pkey on _test_1_num_range_rel
+   ->  Index Scan using _test_2_num_range_rel_pkey on _test_2_num_range_rel
+   ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel
+         Index Cond: (id <= 2500)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt > '2015-02-15';
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+         Index Cond: (dt > 'Sun Feb 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_3_range_rel
+   ->  Seq Scan on _test_4_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE '2015-02-15' < dt; /* test commutator */
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+         Index Cond: ('Sun Feb 15 00:00:00 2015'::timestamp without time zone < dt)
+   ->  Seq Scan on _test_3_range_rel
+   ->  Seq Scan on _test_4_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt >= '2015-02-01' AND dt < '2015-03-01';
+             QUERY PLAN              
+-------------------------------------
+ Append
+   ->  Seq Scan on _test_2_range_rel
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt >= '2015-02-15' AND dt < '2015-03-15';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+         Index Cond: (dt >= 'Sun Feb 15 00:00:00 2015'::timestamp without time zone)
+   ->  Index Scan using _test_3_range_rel_dt_idx on _test_3_range_rel
+         Index Cond: (dt < 'Sun Mar 15 00:00:00 2015'::timestamp without time zone)
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE (dt >= '2015-01-15' AND dt < '2015-02-15') OR (dt > '2015-03-15');
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt >= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+         Index Cond: (dt < 'Sun Feb 15 00:00:00 2015'::timestamp without time zone)
+   ->  Index Scan using _test_3_range_rel_dt_idx on _test_3_range_rel
+         Index Cond: (dt > 'Sun Mar 15 00:00:00 2015'::timestamp without time zone)
+   ->  Seq Scan on _test_4_range_rel
+(8 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel ORDER BY dt;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+   ->  Index Scan using _test_3_range_rel_dt_idx on _test_3_range_rel
+   ->  Index Scan using _test_4_range_rel_dt_idx on _test_4_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt >= '2015-01-15' ORDER BY dt DESC;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan Backward using _test_4_range_rel_dt_idx on _test_4_range_rel
+   ->  Index Scan Backward using _test_3_range_rel_dt_idx on _test_3_range_rel
+   ->  Index Scan Backward using _test_2_range_rel_dt_idx on _test_2_range_rel
+   ->  Index Scan Backward using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt >= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+(6 rows)
+
+/*
+ * Sorting
+ */
+SET enable_indexscan = OFF;
+SET enable_seqscan = ON;
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt < '2015-03-01' ORDER BY dt;
+                QUERY PLAN                 
+-------------------------------------------
+ Sort
+   Sort Key: _test_1_range_rel.dt
+   ->  Append
+         ->  Seq Scan on _test_1_range_rel
+         ->  Seq Scan on _test_2_range_rel
+(5 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM gogudb_partition_table._test_1_range_rel UNION ALL SELECT * FROM gogudb_partition_table._test_2_range_rel ORDER BY dt;
+                QUERY PLAN                 
+-------------------------------------------
+ Sort
+   Sort Key: _test_1_range_rel.dt
+   ->  Append
+         ->  Seq Scan on _test_1_range_rel
+         ->  Seq Scan on _test_2_range_rel
+(5 rows)
+
+SET enable_indexscan = ON;
+SET enable_seqscan = OFF;
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt < '2015-03-01' ORDER BY dt;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM gogudb_partition_table._test_1_range_rel UNION ALL SELECT * FROM gogudb_partition_table._test_2_range_rel ORDER BY dt;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Merge Append
+   Sort Key: _test_1_range_rel.dt
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+   ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel
+(4 rows)
+
+/*
+ * Join
+ */
+set enable_nestloop = OFF;
+SET enable_hashjoin = ON;
+SET enable_mergejoin = OFF;
+EXPLAIN (COSTS OFF)
+SELECT * FROM test.range_rel j1
+JOIN test.range_rel j2 on j2.id = j1.id
+JOIN test.num_range_rel j3 on j3.id = j1.id
+WHERE j1.dt < '2015-03-01' AND j2.dt >= '2015-02-01' ORDER BY j2.dt;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: j2.dt
+   ->  Hash Join
+         Hash Cond: (j1.id = j2.id)
+         ->  Hash Join
+               Hash Cond: (j3.id = j1.id)
+               ->  Append
+                     ->  Index Scan using _test_1_num_range_rel_pkey on _test_1_num_range_rel j3
+                     ->  Index Scan using _test_2_num_range_rel_pkey on _test_2_num_range_rel j3_1
+                     ->  Index Scan using _test_3_num_range_rel_pkey on _test_3_num_range_rel j3_2
+                     ->  Index Scan using _test_4_num_range_rel_pkey on _test_4_num_range_rel j3_3
+               ->  Hash
+                     ->  Append
+                           ->  Index Scan using _test_1_range_rel_pkey on _test_1_range_rel j1
+                           ->  Index Scan using _test_2_range_rel_pkey on _test_2_range_rel j1_1
+         ->  Hash
+               ->  Append
+                     ->  Index Scan using _test_2_range_rel_dt_idx on _test_2_range_rel j2
+                     ->  Index Scan using _test_3_range_rel_dt_idx on _test_3_range_rel j2_1
+                     ->  Index Scan using _test_4_range_rel_dt_idx on _test_4_range_rel j2_2
+(20 rows)
+
+/*
+ * Test inlined SQL functions
+ */
+CREATE TABLE test.sql_inline (id INT NOT NULL);
+SELECT _gogu.create_hash_partitions('test.sql_inline', 'id', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+CREATE OR REPLACE FUNCTION test.sql_inline_func(i_id int) RETURNS SETOF INT AS $$
+	select * from test.sql_inline where id = i_id limit 1;
+$$ LANGUAGE sql STABLE;
+EXPLAIN (COSTS OFF) SELECT * FROM test.sql_inline_func(5);
+                 QUERY PLAN                 
+--------------------------------------------
+ Limit
+   ->  Append
+         ->  Seq Scan on _test_2_sql_inline
+               Filter: (id = 5)
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.sql_inline_func(1);
+                 QUERY PLAN                 
+--------------------------------------------
+ Limit
+   ->  Append
+         ->  Seq Scan on _test_1_sql_inline
+               Filter: (id = 1)
+(4 rows)
+
+DROP FUNCTION test.sql_inline_func(int);
+DROP TABLE test.sql_inline CASCADE;
+NOTICE:  drop cascades to 3 other objects
+/*
+ * Test by @baiyinqiqi (issue #60)
+ */
+CREATE TABLE test.hash_varchar(val VARCHAR(40) NOT NULL);
+INSERT INTO test.hash_varchar SELECT generate_series(1, 20);
+SELECT _gogu.create_hash_partitions('test.hash_varchar', 'val', 4);
+ create_hash_partitions 
+------------------------
+                      4
+(1 row)
+
+SELECT * FROM test.hash_varchar WHERE val = 'a';
+ val 
+-----
+(0 rows)
+
+SELECT * FROM test.hash_varchar WHERE val = '12'::TEXT;
+ val 
+-----
+ 12
+(1 row)
+
+DROP TABLE test.hash_varchar CASCADE;
+NOTICE:  drop cascades to 4 other objects
+/*
+ * Test split and merge
+ */
+/* Split first partition in half */
+SELECT _gogu.split_range_partition('gogudb_partition_table._test_1_num_range_rel', 500);
+ split_range_partition 
+-----------------------
+ {0,1000}
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id BETWEEN 100 AND 700;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_num_range_rel_pkey on _test_1_num_range_rel
+         Index Cond: (id >= 100)
+   ->  Index Scan using _test_5_num_range_rel_pkey on _test_5_num_range_rel
+         Index Cond: (id <= 700)
+(5 rows)
+
+SELECT _gogu.split_range_partition('gogudb_partition_table._test_1_range_rel', '2015-01-15'::DATE);
+  split_range_partition  
+-------------------------
+ {01-01-2015,02-01-2015}
+(1 row)
+
+/* Merge two partitions into one */
+SELECT _gogu.merge_range_partitions('gogudb_partition_table._test_1_num_range_rel', 'gogudb_partition_table._test_' || currval('test.num_range_rel_seq') || '_num_range_rel');
+ merge_range_partitions 
+------------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id BETWEEN 100 AND 700;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_num_range_rel_pkey on _test_1_num_range_rel
+         Index Cond: ((id >= 100) AND (id <= 700))
+(3 rows)
+
+SELECT _gogu.merge_range_partitions('gogudb_partition_table._test_1_range_rel', 'gogudb_partition_table._test_' || currval('test.range_rel_seq') || '_range_rel');
+ merge_range_partitions 
+------------------------
+ 
+(1 row)
+
+/* Append and prepend partitions */
+SELECT _gogu.append_range_partition('test.num_range_rel');
+            append_range_partition            
+----------------------------------------------
+ gogudb_partition_table._test_6_num_range_rel
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id >= 4000;
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_6_num_range_rel
+(2 rows)
+
+SELECT _gogu.prepend_range_partition('test.num_range_rel');
+           prepend_range_partition            
+----------------------------------------------
+ gogudb_partition_table._test_7_num_range_rel
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.num_range_rel WHERE id < 0;
+               QUERY PLAN                
+-----------------------------------------
+ Append
+   ->  Seq Scan on _test_7_num_range_rel
+(2 rows)
+
+SELECT _gogu.drop_range_partition('gogudb_partition_table._test_7_num_range_rel');
+             drop_range_partition             
+----------------------------------------------
+ gogudb_partition_table._test_7_num_range_rel
+(1 row)
+
+SELECT _gogu.drop_range_partition_expand_next('gogudb_partition_table._test_4_num_range_rel');
+ drop_range_partition_expand_next 
+----------------------------------
+ 
+(1 row)
+
+SELECT * FROM _gogu.gogudb_partition_list WHERE parent = 'test.num_range_rel'::regclass;
+       parent       |                  partition                   | parttype | expr | range_min | range_max 
+--------------------+----------------------------------------------+----------+------+-----------+-----------
+ test.num_range_rel | gogudb_partition_table._test_1_num_range_rel |        2 | id   | 0         | 1000
+ test.num_range_rel | gogudb_partition_table._test_2_num_range_rel |        2 | id   | 1000      | 2000
+ test.num_range_rel | gogudb_partition_table._test_3_num_range_rel |        2 | id   | 2000      | 3000
+ test.num_range_rel | gogudb_partition_table._test_6_num_range_rel |        2 | id   | 3000      | 5000
+(4 rows)
+
+SELECT _gogu.drop_range_partition_expand_next('gogudb_partition_table._test_6_num_range_rel');
+ drop_range_partition_expand_next 
+----------------------------------
+ 
+(1 row)
+
+SELECT * FROM _gogu.gogudb_partition_list WHERE parent = 'test.num_range_rel'::regclass;
+       parent       |                  partition                   | parttype | expr | range_min | range_max 
+--------------------+----------------------------------------------+----------+------+-----------+-----------
+ test.num_range_rel | gogudb_partition_table._test_1_num_range_rel |        2 | id   | 0         | 1000
+ test.num_range_rel | gogudb_partition_table._test_2_num_range_rel |        2 | id   | 1000      | 2000
+ test.num_range_rel | gogudb_partition_table._test_3_num_range_rel |        2 | id   | 2000      | 3000
+(3 rows)
+
+SELECT _gogu.append_range_partition('test.range_rel');
+          append_range_partition          
+------------------------------------------
+ gogudb_partition_table._test_6_range_rel
+(1 row)
+
+SELECT _gogu.prepend_range_partition('test.range_rel');
+         prepend_range_partition          
+------------------------------------------
+ gogudb_partition_table._test_7_range_rel
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt BETWEEN '2014-12-15' AND '2015-01-15';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_7_range_rel_dt_idx on _test_7_range_rel
+         Index Cond: (dt >= 'Mon Dec 15 00:00:00 2014'::timestamp without time zone)
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt <= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+(5 rows)
+
+SELECT _gogu.drop_range_partition('gogudb_partition_table._test_7_range_rel');
+           drop_range_partition           
+------------------------------------------
+ gogudb_partition_table._test_7_range_rel
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt BETWEEN '2014-12-15' AND '2015-01-15';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt <= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+(3 rows)
+
+SELECT _gogu.add_range_partition('test.range_rel', '2014-12-01'::DATE, '2015-01-02'::DATE);
+ERROR:  specified range [12-01-2014, 01-02-2015) overlaps with existing partitions
+SELECT _gogu.add_range_partition('test.range_rel', '2014-12-01'::DATE, '2015-01-01'::DATE);
+           add_range_partition            
+------------------------------------------
+ gogudb_partition_table._test_8_range_rel
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt BETWEEN '2014-12-15' AND '2015-01-15';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_8_range_rel_dt_idx on _test_8_range_rel
+         Index Cond: (dt >= 'Mon Dec 15 00:00:00 2014'::timestamp without time zone)
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt <= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+(5 rows)
+
+CREATE TABLE test.range_rel_archive (LIKE test.range_rel INCLUDING ALL);
+SELECT _gogu.attach_range_partition('test.range_rel', 'test.range_rel_archive', '2014-01-01'::DATE, '2015-01-01'::DATE);
+ERROR:  specified range [01-01-2014, 01-01-2015) overlaps with existing partitions
+SELECT _gogu.attach_range_partition('test.range_rel', 'test.range_rel_archive', '2014-01-01'::DATE, '2014-12-01'::DATE);
+ attach_range_partition 
+------------------------
+ test.range_rel_archive
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt BETWEEN '2014-11-15' AND '2015-01-15';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using range_rel_archive_dt_idx on range_rel_archive
+         Index Cond: (dt >= 'Sat Nov 15 00:00:00 2014'::timestamp without time zone)
+   ->  Seq Scan on _test_8_range_rel
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt <= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+(6 rows)
+
+SELECT _gogu.detach_range_partition('test.range_rel_archive');
+NOTICE:  trigger "range_rel_upd_trig" for relation "test.range_rel_archive" does not exist, skipping
+ detach_range_partition 
+------------------------
+ test.range_rel_archive
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt BETWEEN '2014-11-15' AND '2015-01-15';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_8_range_rel
+   ->  Index Scan using _test_1_range_rel_dt_idx on _test_1_range_rel
+         Index Cond: (dt <= 'Thu Jan 15 00:00:00 2015'::timestamp without time zone)
+(4 rows)
+
+CREATE TABLE test.range_rel_test1 (
+	id  SERIAL PRIMARY KEY,
+	dt  TIMESTAMP,
+	txt TEXT,
+	abc INTEGER);
+SELECT _gogu.attach_range_partition('test.range_rel', 'test.range_rel_test1', '2013-01-01'::DATE, '2014-01-01'::DATE);
+ERROR:  partition must have a compatible tuple format
+CREATE TABLE test.range_rel_test2 (
+	id  SERIAL PRIMARY KEY,
+	dt  TIMESTAMP);
+SELECT _gogu.attach_range_partition('test.range_rel', 'test.range_rel_test2', '2013-01-01'::DATE, '2014-01-01'::DATE);
+ERROR:  column "dt" in child table must be marked NOT NULL
+/* Half open ranges */
+SELECT _gogu.add_range_partition('test.range_rel', NULL, '2014-12-01'::DATE, 'test.range_rel_minus_infinity');
+      add_range_partition      
+-------------------------------
+ test.range_rel_minus_infinity
+(1 row)
+
+SELECT _gogu.add_range_partition('test.range_rel', '2015-06-01'::DATE, NULL, 'test.range_rel_plus_infinity');
+     add_range_partition      
+------------------------------
+ test.range_rel_plus_infinity
+(1 row)
+
+SELECT _gogu.append_range_partition('test.range_rel');
+ERROR:  Cannot append partition because last partition's range is half open
+SELECT _gogu.prepend_range_partition('test.range_rel');
+ERROR:  Cannot prepend partition because first partition's range is half open
+DROP TABLE test.range_rel_minus_infinity;
+CREATE TABLE test.range_rel_minus_infinity (LIKE test.range_rel INCLUDING ALL);
+SELECT _gogu.attach_range_partition('test.range_rel', 'test.range_rel_minus_infinity', NULL, '2014-12-01'::DATE);
+    attach_range_partition     
+-------------------------------
+ test.range_rel_minus_infinity
+(1 row)
+
+SELECT * FROM _gogu.gogudb_partition_list WHERE parent = 'test.range_rel'::REGCLASS;
+     parent     |                partition                 | parttype | expr |        range_min         |        range_max         
+----------------+------------------------------------------+----------+------+--------------------------+--------------------------
+ test.range_rel | test.range_rel_minus_infinity            |        2 | dt   |                          | Mon Dec 01 00:00:00 2014
+ test.range_rel | gogudb_partition_table._test_8_range_rel |        2 | dt   | Mon Dec 01 00:00:00 2014 | Thu Jan 01 00:00:00 2015
+ test.range_rel | gogudb_partition_table._test_1_range_rel |        2 | dt   | Thu Jan 01 00:00:00 2015 | Sun Feb 01 00:00:00 2015
+ test.range_rel | gogudb_partition_table._test_2_range_rel |        2 | dt   | Sun Feb 01 00:00:00 2015 | Sun Mar 01 00:00:00 2015
+ test.range_rel | gogudb_partition_table._test_3_range_rel |        2 | dt   | Sun Mar 01 00:00:00 2015 | Wed Apr 01 00:00:00 2015
+ test.range_rel | gogudb_partition_table._test_4_range_rel |        2 | dt   | Wed Apr 01 00:00:00 2015 | Fri May 01 00:00:00 2015
+ test.range_rel | gogudb_partition_table._test_6_range_rel |        2 | dt   | Fri May 01 00:00:00 2015 | Mon Jun 01 00:00:00 2015
+ test.range_rel | test.range_rel_plus_infinity             |        2 | dt   | Mon Jun 01 00:00:00 2015 | 
+(8 rows)
+
+INSERT INTO test.range_rel (dt) VALUES ('2012-06-15');
+INSERT INTO test.range_rel (dt) VALUES ('2015-12-15');
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt < '2015-01-01';
+                 QUERY PLAN                 
+--------------------------------------------
+ Append
+   ->  Seq Scan on range_rel_minus_infinity
+   ->  Seq Scan on _test_8_range_rel
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt >= '2015-05-01';
+                QUERY PLAN                 
+-------------------------------------------
+ Append
+   ->  Seq Scan on _test_6_range_rel
+   ->  Seq Scan on range_rel_plus_infinity
+(3 rows)
+
+/*
+ * Zero partitions count and adding partitions with specified name
+ */
+CREATE TABLE test.zero(
+	id		SERIAL PRIMARY KEY,
+	value	INT NOT NULL);
+INSERT INTO test.zero SELECT g, g FROM generate_series(1, 100) as g;
+SELECT _gogu.create_range_partitions('test.zero', 'value', 50, 10, 0);
+ create_range_partitions 
+-------------------------
+                       0
+(1 row)
+
+SELECT _gogu.append_range_partition('test.zero', 'test.zero_0');
+ERROR:  relation "zero" has no partitions
+SELECT _gogu.prepend_range_partition('test.zero', 'test.zero_1');
+ERROR:  relation "zero" has no partitions
+SELECT _gogu.add_range_partition('test.zero', 50, 70, 'test.zero_50');
+ add_range_partition 
+---------------------
+ test.zero_50
+(1 row)
+
+SELECT _gogu.append_range_partition('test.zero', 'test.zero_appended');
+ append_range_partition 
+------------------------
+ test.zero_appended
+(1 row)
+
+SELECT _gogu.prepend_range_partition('test.zero', 'test.zero_prepended');
+ prepend_range_partition 
+-------------------------
+ test.zero_prepended
+(1 row)
+
+SELECT _gogu.split_range_partition('test.zero_50', 60, 'test.zero_60');
+ split_range_partition 
+-----------------------
+ {50,70}
+(1 row)
+
+DROP TABLE test.zero CASCADE;
+NOTICE:  drop cascades to 5 other objects
+/*
+ * Check that altering table columns doesn't break trigger
+ */
+ALTER TABLE test.hash_rel ADD COLUMN abc int;
+INSERT INTO test.hash_rel (id, value, abc) VALUES (123, 456, 789);
+SELECT * FROM test.hash_rel WHERE id = 123;
+ id  | value | abc 
+-----+-------+-----
+ 123 |   456 | 789
+(1 row)
+
+/* Test replacing hash partition */
+CREATE TABLE test.hash_rel_extern (LIKE test.hash_rel INCLUDING ALL);
+SELECT _gogu.replace_hash_partition('gogudb_partition_table._test_0_hash_rel', 'test.hash_rel_extern');
+ replace_hash_partition 
+------------------------
+ test.hash_rel_extern
+(1 row)
+
+/* Check the consistency of test.hash_rel_0 and test.hash_rel_extern relations */
+EXPLAIN(COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on hash_rel_extern
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(4 rows)
+
+SELECT parent, partition, parttype
+FROM _gogu.gogudb_partition_list
+WHERE parent='test.hash_rel'::regclass
+ORDER BY 2;
+    parent     |                partition                | parttype 
+---------------+-----------------------------------------+----------
+ test.hash_rel | gogudb_partition_table._test_1_hash_rel |        1
+ test.hash_rel | gogudb_partition_table._test_2_hash_rel |        1
+ test.hash_rel | test.hash_rel_extern                    |        1
+(3 rows)
+
+SELECT c.oid::regclass::text,
+    array_agg(pg_get_indexdef(i.indexrelid)) AS indexes,
+    array_agg(pg_get_triggerdef(t.oid)) AS triggers
+FROM pg_class c
+    LEFT JOIN pg_index i ON c.oid=i.indrelid
+    LEFT JOIN pg_trigger t ON c.oid=t.tgrelid
+WHERE c.oid IN ('gogudb_partition_table._test_0_hash_rel'::regclass, 'test.hash_rel_extern'::regclass)
+GROUP BY 1 ORDER BY 1;
+                   oid                   |                                                  indexes                                                  | triggers 
+-----------------------------------------+-----------------------------------------------------------------------------------------------------------+----------
+ gogudb_partition_table._test_0_hash_rel | {"CREATE UNIQUE INDEX _test_0_hash_rel_pkey ON gogudb_partition_table._test_0_hash_rel USING btree (id)"} | {NULL}
+ test.hash_rel_extern                    | {"CREATE UNIQUE INDEX hash_rel_extern_pkey ON test.hash_rel_extern USING btree (id)"}                     | {NULL}
+(2 rows)
+
+SELECT _gogu.is_tuple_convertible('gogudb_partition_table._test_0_hash_rel', 'test.hash_rel_extern');
+ is_tuple_convertible 
+----------------------
+ t
+(1 row)
+
+INSERT INTO test.hash_rel SELECT * FROM gogudb_partition_table._test_0_hash_rel;
+DROP TABLE gogudb_partition_table._test_0_hash_rel;
+/* Table with which we are replacing partition must have exact same structure */
+CREATE TABLE test.hash_rel_wrong(
+	id		INTEGER NOT NULL,
+	value	INTEGER);
+SELECT _gogu.replace_hash_partition('gogudb_partition_table._test_1_hash_rel', 'test.hash_rel_wrong');
+ERROR:  column "value" in child table must be marked NOT NULL
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel;
+             QUERY PLAN             
+------------------------------------
+ Append
+   ->  Seq Scan on hash_rel_extern
+   ->  Seq Scan on _test_1_hash_rel
+   ->  Seq Scan on _test_2_hash_rel
+(4 rows)
+
+/*
+ * Clean up
+ */
+SELECT _gogu.drop_partitions('test.hash_rel');
+NOTICE:  2 rows copied from gogudb_partition_table._test_1_hash_rel
+NOTICE:  4 rows copied from gogudb_partition_table._test_2_hash_rel
+NOTICE:  1 rows copied from test.hash_rel_extern
+ drop_partitions 
+-----------------
+               3
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.hash_rel;
+ count 
+-------
+     7
+(1 row)
+
+SELECT _gogu.create_hash_partitions('test.hash_rel', 'value', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+SELECT _gogu.drop_partitions('test.hash_rel', TRUE);
+ drop_partitions 
+-----------------
+               3
+(1 row)
+
+SELECT COUNT(*) FROM ONLY test.hash_rel;
+ count 
+-------
+     0
+(1 row)
+
+DROP TABLE test.hash_rel CASCADE;
+SELECT _gogu.drop_partitions('test.num_range_rel');
+NOTICE:  999 rows copied from gogudb_partition_table._test_1_num_range_rel
+NOTICE:  1000 rows copied from gogudb_partition_table._test_2_num_range_rel
+NOTICE:  1000 rows copied from gogudb_partition_table._test_3_num_range_rel
+ drop_partitions 
+-----------------
+               3
+(1 row)
+
+DROP TABLE test.num_range_rel CASCADE;
+DROP TABLE test.range_rel CASCADE;
+NOTICE:  drop cascades to 10 other objects
+/* Test automatic partition creation */
+CREATE TABLE test.range_rel (
+	id	SERIAL PRIMARY KEY,
+	dt	TIMESTAMP NOT NULL,
+	data TEXT);
+SELECT _gogu.create_range_partitions('test.range_rel', 'dt', '2015-01-01'::DATE, '10 days'::INTERVAL, 1);
+ create_range_partitions 
+-------------------------
+                       1
+(1 row)
+
+INSERT INTO test.range_rel (dt)
+SELECT generate_series('2015-01-01', '2015-04-30', '1 day'::interval);
+INSERT INTO test.range_rel (dt)
+SELECT generate_series('2014-12-31', '2014-12-01', '-1 day'::interval);
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt = '2014-12-15';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_14_range_rel
+         Filter: (dt = 'Mon Dec 15 00:00:00 2014'::timestamp without time zone)
+(3 rows)
+
+SELECT * FROM test.range_rel WHERE dt = '2014-12-15';
+ id  |            dt            | data 
+-----+--------------------------+------
+ 137 | Mon Dec 15 00:00:00 2014 | 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt = '2015-03-15';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_8_range_rel
+         Filter: (dt = 'Sun Mar 15 00:00:00 2015'::timestamp without time zone)
+(3 rows)
+
+SELECT * FROM test.range_rel WHERE dt = '2015-03-15';
+ id |            dt            | data 
+----+--------------------------+------
+ 74 | Sun Mar 15 00:00:00 2015 | 
+(1 row)
+
+SELECT _gogu.set_auto('test.range_rel', false);
+ set_auto 
+----------
+ 
+(1 row)
+
+INSERT INTO test.range_rel (dt) VALUES ('2015-06-01');
+ERROR:  no suitable partition for key 'Mon Jun 01 00:00:00 2015'
+SELECT _gogu.set_auto('test.range_rel', true);
+ set_auto 
+----------
+ 
+(1 row)
+
+INSERT INTO test.range_rel (dt) VALUES ('2015-06-01');
+/*
+ * Test auto removing record from config on table DROP (but not on column drop
+ * as it used to be before version 1.2)
+ */
+ALTER TABLE test.range_rel DROP COLUMN data;
+SELECT * FROM _gogu.gogudb_config;
+    partrel     | expr | parttype | range_interval |                                                       cooked_expr                                                       
+----------------+------+----------+----------------+-------------------------------------------------------------------------------------------------------------------------
+ test.range_rel | dt   |        2 | @ 10 days      | {VAR :varno 1 :varattno 2 :vartype 1114 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 8}
+(1 row)
+
+DROP TABLE test.range_rel CASCADE;
+NOTICE:  drop cascades to 21 other objects
+SELECT * FROM _gogu.gogudb_config;
+ partrel | expr | parttype | range_interval | cooked_expr 
+---------+------+----------+----------------+-------------
+(0 rows)
+
+/* Check overlaps */
+CREATE TABLE test.num_range_rel (
+	id	SERIAL PRIMARY KEY,
+	txt	TEXT);
+SELECT _gogu.create_range_partitions('test.num_range_rel', 'id', 1000, 1000, 4);
+ create_range_partitions 
+-------------------------
+                       4
+(1 row)
+
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 4001, 5000);
+ERROR:  specified range [4001, 5000) overlaps with existing partitions
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 4000, 5000);
+ERROR:  specified range [4000, 5000) overlaps with existing partitions
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 3999, 5000);
+ERROR:  specified range [3999, 5000) overlaps with existing partitions
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 3000, 3500);
+ERROR:  specified range [3000, 3500) overlaps with existing partitions
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 0, 999);
+ check_range_available 
+-----------------------
+ 
+(1 row)
+
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 0, 1000);
+ check_range_available 
+-----------------------
+ 
+(1 row)
+
+SELECT _gogu.check_range_available('test.num_range_rel'::regclass, 0, 1001);
+ERROR:  specified range [0, 1001) overlaps with existing partitions
+/* CaMeL cAsE table names and attributes */
+CREATE TABLE test."TeSt" (a INT NOT NULL, b INT);
+SELECT _gogu.create_hash_partitions('test.TeSt', 'a', 3);
+ERROR:  relation "test.test" does not exist at character 37
+SELECT _gogu.create_hash_partitions('test."TeSt"', 'a', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+INSERT INTO test."TeSt" VALUES (1, 1);
+INSERT INTO test."TeSt" VALUES (2, 2);
+INSERT INTO test."TeSt" VALUES (3, 3);
+SELECT * FROM test."TeSt";
+ a | b 
+---+---
+ 3 | 3
+ 1 | 1
+ 2 | 2
+(3 rows)
+
+SELECT _gogu.create_update_triggers('test."TeSt"');
+ create_update_triggers 
+------------------------
+ 
+(1 row)
+
+UPDATE test."TeSt" SET a = 1;
+SELECT * FROM test."TeSt";
+ a | b 
+---+---
+ 1 | 3
+ 1 | 1
+ 1 | 2
+(3 rows)
+
+SELECT * FROM test."TeSt" WHERE a = 1;
+ a | b 
+---+---
+ 1 | 3
+ 1 | 1
+ 1 | 2
+(3 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test."TeSt" WHERE a = 1;
+            QUERY PLAN            
+----------------------------------
+ Append
+   ->  Seq Scan on "_test_1_TeSt"
+         Filter: (a = 1)
+(3 rows)
+
+SELECT _gogu.drop_partitions('test."TeSt"');
+NOTICE:  0 rows copied from gogudb_partition_table."_test_0_TeSt"
+NOTICE:  3 rows copied from gogudb_partition_table."_test_1_TeSt"
+NOTICE:  0 rows copied from gogudb_partition_table."_test_2_TeSt"
+ drop_partitions 
+-----------------
+               3
+(1 row)
+
+SELECT * FROM test."TeSt";
+ a | b 
+---+---
+ 1 | 3
+ 1 | 1
+ 1 | 2
+(3 rows)
+
+DROP TABLE test."TeSt" CASCADE;
+CREATE TABLE test."RangeRel" (
+	id	SERIAL PRIMARY KEY,
+	dt	TIMESTAMP NOT NULL,
+	txt	TEXT);
+INSERT INTO test."RangeRel" (dt, txt)
+SELECT g, md5(g::TEXT) FROM generate_series('2015-01-01', '2015-01-03', '1 day'::interval) as g;
+SELECT _gogu.create_range_partitions('test."RangeRel"', 'dt', '2015-01-01'::DATE, '1 day'::INTERVAL);
+ create_range_partitions 
+-------------------------
+                       3
+(1 row)
+
+SELECT _gogu.append_range_partition('test."RangeRel"');
+          append_range_partition           
+-------------------------------------------
+ gogudb_partition_table."_test_4_RangeRel"
+(1 row)
+
+SELECT _gogu.prepend_range_partition('test."RangeRel"');
+          prepend_range_partition          
+-------------------------------------------
+ gogudb_partition_table."_test_5_RangeRel"
+(1 row)
+
+SELECT _gogu.merge_range_partitions('gogudb_partition_table."_test_1_RangeRel"', 'gogudb_partition_table."_test_' || currval('test."RangeRel_seq"') || '_RangeRel"');
+ merge_range_partitions 
+------------------------
+ 
+(1 row)
+
+SELECT _gogu.split_range_partition('gogudb_partition_table."_test_1_RangeRel"', '2015-01-01'::DATE);
+  split_range_partition  
+-------------------------
+ {12-31-2014,01-02-2015}
+(1 row)
+
+DROP TABLE test."RangeRel" CASCADE;
+NOTICE:  drop cascades to 6 other objects
+SELECT * FROM _gogu.gogudb_config;
+      partrel       | expr | parttype | range_interval |                                                      cooked_expr                                                      
+--------------------+------+----------+----------------+-----------------------------------------------------------------------------------------------------------------------
+ test.num_range_rel | id   |        2 | 1000           | {VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 8}
+(1 row)
+
+CREATE TABLE test."RangeRel" (
+	id	SERIAL PRIMARY KEY,
+	dt	TIMESTAMP NOT NULL,
+	txt	TEXT);
+SELECT _gogu.create_range_partitions('test."RangeRel"', 'id', 1, 100, 3);
+ create_range_partitions 
+-------------------------
+                       3
+(1 row)
+
+DROP TABLE test."RangeRel" CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DROP EXTENSION gogudb cascade;
+NOTICE:  drop cascades to 4 other objects
+/* Test that everything works fine without schemas */
+CREATE EXTENSION gogudb;
+/* Hash */
+CREATE TABLE test.hash_rel (
+	id		SERIAL PRIMARY KEY,
+	value	INTEGER NOT NULL);
+INSERT INTO test.hash_rel (value) SELECT g FROM generate_series(1, 10000) as g;
+SELECT create_hash_partitions('test.hash_rel', 'value', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.hash_rel WHERE id = 1234;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Append
+   ->  Index Scan using _test_0_hash_rel_pkey on _test_0_hash_rel
+         Index Cond: (id = 1234)
+   ->  Index Scan using _test_1_hash_rel_pkey on _test_1_hash_rel
+         Index Cond: (id = 1234)
+   ->  Index Scan using _test_2_hash_rel_pkey on _test_2_hash_rel
+         Index Cond: (id = 1234)
+(7 rows)
+
+/* Range */
+CREATE TABLE test.range_rel (
+	id		SERIAL PRIMARY KEY,
+	dt		TIMESTAMP NOT NULL,
+	value	INTEGER);
+INSERT INTO test.range_rel (dt, value) SELECT g, extract(day from g) FROM generate_series('2010-01-01'::date, '2010-12-31'::date, '1 day') as g;
+SELECT create_range_partitions('test.range_rel', 'dt', '2010-01-01'::date, '1 month'::interval, 12);
+ create_range_partitions 
+-------------------------
+                      12
+(1 row)
+
+SELECT merge_range_partitions('gogudb_partition_table._test_1_range_rel', 'gogudb_partition_table._test_2_range_rel');
+ merge_range_partitions 
+------------------------
+ 
+(1 row)
+
+SELECT split_range_partition('gogudb_partition_table._test_1_range_rel', '2010-02-15'::date);
+  split_range_partition  
+-------------------------
+ {01-01-2010,03-01-2010}
+(1 row)
+
+SELECT append_range_partition('test.range_rel');
+          append_range_partition           
+-------------------------------------------
+ gogudb_partition_table._test_14_range_rel
+(1 row)
+
+SELECT prepend_range_partition('test.range_rel');
+          prepend_range_partition          
+-------------------------------------------
+ gogudb_partition_table._test_15_range_rel
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt < '2010-03-01';
+              QUERY PLAN              
+--------------------------------------
+ Append
+   ->  Seq Scan on _test_15_range_rel
+   ->  Seq Scan on _test_1_range_rel
+   ->  Seq Scan on _test_13_range_rel
+(4 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.range_rel WHERE dt > '2010-12-15';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_12_range_rel
+         Filter: (dt > 'Wed Dec 15 00:00:00 2010'::timestamp without time zone)
+   ->  Seq Scan on _test_14_range_rel
+(4 rows)
+
+/* Create range partitions from whole range */
+SELECT drop_partitions('test.range_rel');
+NOTICE:  45 rows copied from gogudb_partition_table._test_1_range_rel
+NOTICE:  31 rows copied from gogudb_partition_table._test_3_range_rel
+NOTICE:  30 rows copied from gogudb_partition_table._test_4_range_rel
+NOTICE:  31 rows copied from gogudb_partition_table._test_5_range_rel
+NOTICE:  30 rows copied from gogudb_partition_table._test_6_range_rel
+NOTICE:  31 rows copied from gogudb_partition_table._test_7_range_rel
+NOTICE:  31 rows copied from gogudb_partition_table._test_8_range_rel
+NOTICE:  30 rows copied from gogudb_partition_table._test_9_range_rel
+NOTICE:  31 rows copied from gogudb_partition_table._test_10_range_rel
+NOTICE:  30 rows copied from gogudb_partition_table._test_11_range_rel
+NOTICE:  31 rows copied from gogudb_partition_table._test_12_range_rel
+NOTICE:  14 rows copied from gogudb_partition_table._test_13_range_rel
+NOTICE:  0 rows copied from gogudb_partition_table._test_14_range_rel
+NOTICE:  0 rows copied from gogudb_partition_table._test_15_range_rel
+ drop_partitions 
+-----------------
+              14
+(1 row)
+
+/* Test NOT operator */
+CREATE TABLE bool_test(a INT NOT NULL, b BOOLEAN);
+SELECT create_hash_partitions('bool_test', 'a', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+INSERT INTO bool_test SELECT g, (g % 4) = 0 FROM generate_series(1, 100) AS g;
+SELECT count(*) FROM bool_test;
+ count 
+-------
+   100
+(1 row)
+
+SELECT count(*) FROM bool_test WHERE (b = true AND b = false);
+ count 
+-------
+     0
+(1 row)
+
+SELECT count(*) FROM bool_test WHERE b = false;	/* 75 values */
+ count 
+-------
+    75
+(1 row)
+
+SELECT count(*) FROM bool_test WHERE b = true;	/* 25 values */
+ count 
+-------
+    25
+(1 row)
+
+DROP TABLE bool_test CASCADE;
+NOTICE:  drop cascades to 3 other objects
+/* Special test case (quals generation) -- fixing commit f603e6c5 */
+CREATE TABLE test.special_case_1_ind_o_s(val serial, comment text);
+INSERT INTO test.special_case_1_ind_o_s SELECT generate_series(1, 200), NULL;
+SELECT create_range_partitions('test.special_case_1_ind_o_s', 'val', 1, 50);
+ create_range_partitions 
+-------------------------
+                       4
+(1 row)
+
+INSERT INTO gogudb_partition_table._test_2_special_case_1_ind_o_s SELECT 75 FROM generate_series(1, 6000);
+CREATE INDEX ON gogudb_partition_table._test_2_special_case_1_ind_o_s (val, comment);
+VACUUM ANALYZE gogudb_partition_table._test_2_special_case_1_ind_o_s;
+EXPLAIN (COSTS OFF) SELECT * FROM test.special_case_1_ind_o_s WHERE val < 75 AND comment = 'a';
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_1_special_case_1_ind_o_s
+         Filter: (comment = 'a'::text)
+   ->  Index Only Scan using _test_2_special_case_1_ind_o_s_val_comment_idx on _test_2_special_case_1_ind_o_s
+         Index Cond: ((val < 75) AND (comment = 'a'::text))
+(5 rows)
+
+SELECT set_enable_parent('test.special_case_1_ind_o_s', true);
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.special_case_1_ind_o_s WHERE val < 75 AND comment = 'a';
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on special_case_1_ind_o_s
+         Filter: ((val < 75) AND (comment = 'a'::text))
+   ->  Seq Scan on _test_1_special_case_1_ind_o_s
+         Filter: (comment = 'a'::text)
+   ->  Index Only Scan using _test_2_special_case_1_ind_o_s_val_comment_idx on _test_2_special_case_1_ind_o_s
+         Index Cond: ((val < 75) AND (comment = 'a'::text))
+(7 rows)
+
+SELECT set_enable_parent('test.special_case_1_ind_o_s', false);
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM test.special_case_1_ind_o_s WHERE val < 75 AND comment = 'a';
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on _test_1_special_case_1_ind_o_s
+         Filter: (comment = 'a'::text)
+   ->  Index Only Scan using _test_2_special_case_1_ind_o_s_val_comment_idx on _test_2_special_case_1_ind_o_s
+         Index Cond: ((val < 75) AND (comment = 'a'::text))
+(5 rows)
+
+/* Test index scans on child relation under enable_parent is set */
+CREATE TABLE test.index_on_childs(c1 integer not null, c2 integer);
+CREATE INDEX ON test.index_on_childs(c2);
+INSERT INTO test.index_on_childs SELECT i, (random()*10000)::integer FROM generate_series(1, 10000) i;
+SELECT create_range_partitions('test.index_on_childs', 'c1', 1, 1000, 0, false);
+ create_range_partitions 
+-------------------------
+                       0
+(1 row)
+
+SELECT add_range_partition('test.index_on_childs', 1, 1000, 'test.index_on_childs_1_1k');
+    add_range_partition    
+---------------------------
+ test.index_on_childs_1_1k
+(1 row)
+
+SELECT append_range_partition('test.index_on_childs', 'test.index_on_childs_1k_2k');
+   append_range_partition   
+----------------------------
+ test.index_on_childs_1k_2k
+(1 row)
+
+SELECT append_range_partition('test.index_on_childs', 'test.index_on_childs_2k_3k');
+   append_range_partition   
+----------------------------
+ test.index_on_childs_2k_3k
+(1 row)
+
+SELECT append_range_partition('test.index_on_childs', 'test.index_on_childs_3k_4k');
+   append_range_partition   
+----------------------------
+ test.index_on_childs_3k_4k
+(1 row)
+
+SELECT append_range_partition('test.index_on_childs', 'test.index_on_childs_4k_5k');
+   append_range_partition   
+----------------------------
+ test.index_on_childs_4k_5k
+(1 row)
+
+SELECT set_enable_parent('test.index_on_childs', true);
+ set_enable_parent 
+-------------------
+ 
+(1 row)
+
+VACUUM ANALYZE test.index_on_childs;
+EXPLAIN (COSTS OFF) SELECT * FROM test.index_on_childs WHERE c1 > 100 AND c1 < 2500 AND c2 = 500;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using index_on_childs_c2_idx on index_on_childs
+         Index Cond: (c2 = 500)
+         Filter: ((c1 > 100) AND (c1 < 2500))
+   ->  Index Scan using index_on_childs_1_1k_c2_idx on index_on_childs_1_1k
+         Index Cond: (c2 = 500)
+         Filter: (c1 > 100)
+   ->  Index Scan using index_on_childs_1k_2k_c2_idx on index_on_childs_1k_2k
+         Index Cond: (c2 = 500)
+   ->  Index Scan using index_on_childs_2k_3k_c2_idx on index_on_childs_2k_3k
+         Index Cond: (c2 = 500)
+         Filter: (c1 < 2500)
+(12 rows)
+
+/* Test create_range_partitions() + partition_names */
+CREATE TABLE test.provided_part_names(id INT NOT NULL);
+INSERT INTO test.provided_part_names SELECT generate_series(1, 10);
+SELECT create_hash_partitions('test.provided_part_names', 'id', 2,
+							  partition_names := ARRAY['p1', 'p2']::TEXT[]); /* ok */
+ create_hash_partitions 
+------------------------
+                      2
+(1 row)
+
+/* list partitions */
+SELECT partition FROM gogudb_partition_list
+WHERE parent = 'test.provided_part_names'::REGCLASS
+ORDER BY partition;
+ partition 
+-----------
+ p1
+ p2
+(2 rows)
+
+DROP TABLE test.provided_part_names CASCADE;
+NOTICE:  drop cascades to 2 other objects
+/* Check that multilivel is prohibited */
+CREATE TABLE test.multi(key int NOT NULL);
+SELECT create_hash_partitions('test.multi', 'key', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+SELECT create_hash_partitions('gogudb_partition_table._test_1_multi', 'key', 3);
+ERROR:  multilevel partitioning is not supported
+DROP TABLE test.multi CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DROP SCHEMA test CASCADE;
+NOTICE:  drop cascades to 24 other objects
+DROP EXTENSION gogudb CASCADE;

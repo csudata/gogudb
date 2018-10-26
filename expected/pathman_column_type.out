@@ -1,0 +1,169 @@
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA test_column_type;
+/*
+ * RANGE partitioning.
+ */
+/* create new table (val int) */
+CREATE TABLE test_column_type.test(val INT4 NOT NULL);
+SELECT create_range_partitions('test_column_type.test', 'val', 1, 10, 10);
+ create_range_partitions 
+-------------------------
+                      10
+(1 row)
+
+/* make sure that bounds and dispatch info has been cached */
+SELECT * FROM test_column_type.test;
+ val 
+-----
+(0 rows)
+
+SELECT context, entries FROM gogudb_cache_stats ORDER BY context;
+         context          | entries 
+--------------------------+---------
+ maintenance              |       0
+ partition bounds cache   |      10
+ partition dispatch cache |       1
+ partition parents cache  |      10
+(4 rows)
+
+/* change column's type (should flush caches) */
+ALTER TABLE test_column_type.test ALTER val TYPE NUMERIC;
+/* check that parsed expression was cleared */
+SELECT partrel, cooked_expr FROM gogudb_config;
+        partrel        | cooked_expr 
+-----------------------+-------------
+ test_column_type.test | 
+(1 row)
+
+/* make sure that everything works properly */
+SELECT * FROM test_column_type.test;
+ val 
+-----
+(0 rows)
+
+/* check that expression has been built */
+SELECT partrel, cooked_expr FROM gogudb_config;
+        partrel        |                                                       cooked_expr                                                       
+-----------------------+-------------------------------------------------------------------------------------------------------------------------
+ test_column_type.test | {VAR :varno 1 :varattno 1 :vartype 1700 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 8}
+(1 row)
+
+SELECT context, entries FROM gogudb_cache_stats ORDER BY context;
+         context          | entries 
+--------------------------+---------
+ maintenance              |       0
+ partition bounds cache   |      10
+ partition dispatch cache |       1
+ partition parents cache  |      10
+(4 rows)
+
+/* check insert dispatching */
+INSERT INTO test_column_type.test VALUES (1);
+SELECT tableoid::regclass, * FROM test_column_type.test;
+                    tableoid                     | val 
+-------------------------------------------------+-----
+ gogudb_partition_table._test_column_type_1_test |   1
+(1 row)
+
+SELECT drop_partitions('test_column_type.test');
+NOTICE:  1 rows copied from gogudb_partition_table._test_column_type_1_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_2_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_3_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_4_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_5_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_6_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_7_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_8_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_9_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_10_test
+ drop_partitions 
+-----------------
+              10
+(1 row)
+
+DROP TABLE test_column_type.test CASCADE;
+/*
+ * HASH partitioning.
+ */
+/* create new table (id int, val int) */
+CREATE TABLE test_column_type.test(id INT4 NOT NULL, val INT4);
+SELECT create_hash_partitions('test_column_type.test', 'id', 5);
+ create_hash_partitions 
+------------------------
+                      5
+(1 row)
+
+/* make sure that bounds and dispatch info has been cached */
+SELECT * FROM test_column_type.test;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT context, entries FROM gogudb_cache_stats ORDER BY context;
+         context          | entries 
+--------------------------+---------
+ maintenance              |       0
+ partition bounds cache   |       5
+ partition dispatch cache |       1
+ partition parents cache  |       5
+(4 rows)
+
+/* change column's type (should NOT work) */
+ALTER TABLE test_column_type.test ALTER id TYPE NUMERIC;
+ERROR:  cannot change type of column "id" of table "test" partitioned by HASH
+/* make sure that everything works properly */
+SELECT * FROM test_column_type.test;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT context, entries FROM gogudb_cache_stats ORDER BY context;
+         context          | entries 
+--------------------------+---------
+ maintenance              |       0
+ partition bounds cache   |       5
+ partition dispatch cache |       1
+ partition parents cache  |       5
+(4 rows)
+
+/* change column's type (should flush caches) */
+ALTER TABLE test_column_type.test ALTER val TYPE NUMERIC;
+/* make sure that everything works properly */
+SELECT * FROM test_column_type.test;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT context, entries FROM gogudb_cache_stats ORDER BY context;
+         context          | entries 
+--------------------------+---------
+ maintenance              |       0
+ partition bounds cache   |       5
+ partition dispatch cache |       1
+ partition parents cache  |       5
+(4 rows)
+
+/* check insert dispatching */
+INSERT INTO test_column_type.test VALUES (1);
+SELECT tableoid::regclass, * FROM test_column_type.test;
+                    tableoid                     | id | val 
+-------------------------------------------------+----+-----
+ gogudb_partition_table._test_column_type_2_test |  1 |    
+(1 row)
+
+SELECT drop_partitions('test_column_type.test');
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_0_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_1_test
+NOTICE:  1 rows copied from gogudb_partition_table._test_column_type_2_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_3_test
+NOTICE:  0 rows copied from gogudb_partition_table._test_column_type_4_test
+ drop_partitions 
+-----------------
+               5
+(1 row)
+
+DROP TABLE test_column_type.test CASCADE;
+DROP SCHEMA test_column_type CASCADE;
+DROP EXTENSION gogudb;

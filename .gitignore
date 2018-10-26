@@ -1,0 +1,17 @@
+.deps
+isolation_output
+results/*
+regression.diffs
+regression.out
+*.o
+*.so
+*.pyc
+*.gcda
+*.gcno
+*.gcov
+pg_pathman--*.sql
+tags
+cscope*
+.DS_Store
+xcode/*
+gogudb--*.sql

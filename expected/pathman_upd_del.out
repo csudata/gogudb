@@ -1,0 +1,457 @@
+/*
+ * -------------------------------------------
+ *  NOTE: This test behaves differenly on 9.5
+ * -------------------------------------------
+ */
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA test;
+SET enable_indexscan = ON;
+SET enable_seqscan = OFF;
+/* Temporary tables for JOINs */
+CREATE TABLE test.tmp (id INTEGER NOT NULL, value INTEGER NOT NULL);
+INSERT INTO test.tmp VALUES (1, 1), (2, 2);
+CREATE TABLE test.tmp2 (id INTEGER NOT NULL, value INTEGER NOT NULL);
+INSERT INTO test.tmp2 SELECT i % 10 + 1, i FROM generate_series(1, 100) i;
+SELECT _gogu.create_range_partitions('test.tmp2', 'id', 1, 1, 10);
+ create_range_partitions 
+-------------------------
+                      10
+(1 row)
+
+/* Partition table by RANGE */
+CREATE TABLE test.range_rel (
+	id		SERIAL PRIMARY KEY,
+	dt		TIMESTAMP NOT NULL,
+	value	INTEGER);
+INSERT INTO test.range_rel (dt, value) SELECT g, extract(day from g)
+FROM generate_series('2010-01-01'::date, '2010-12-31'::date, '1 day') AS g;
+SELECT _gogu.create_range_partitions('test.range_rel', 'dt',
+									   '2010-01-01'::date, '1 month'::interval,
+									   12);
+ create_range_partitions 
+-------------------------
+                      12
+(1 row)
+
+VACUUM ANALYZE;
+/*
+ * Test UPDATE and DELETE
+ */
+/* have partitions for this 'dt' */
+EXPLAIN (COSTS OFF) UPDATE test.range_rel SET value = 111 WHERE dt = '2010-06-15';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Update on _test_6_range_rel
+   ->  Seq Scan on _test_6_range_rel
+         Filter: (dt = 'Tue Jun 15 00:00:00 2010'::timestamp without time zone)
+(3 rows)
+
+BEGIN;
+UPDATE test.range_rel SET value = 111 WHERE dt = '2010-06-15';
+SELECT * FROM test.range_rel WHERE dt = '2010-06-15';
+ id  |            dt            | value 
+-----+--------------------------+-------
+ 166 | Tue Jun 15 00:00:00 2010 |   111
+(1 row)
+
+ROLLBACK;
+/* have partitions for this 'dt' */
+EXPLAIN (COSTS OFF) DELETE FROM test.range_rel WHERE dt = '2010-06-15';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Delete on _test_6_range_rel
+   ->  Seq Scan on _test_6_range_rel
+         Filter: (dt = 'Tue Jun 15 00:00:00 2010'::timestamp without time zone)
+(3 rows)
+
+BEGIN;
+DELETE FROM test.range_rel WHERE dt = '2010-06-15';
+SELECT * FROM test.range_rel WHERE dt = '2010-06-15';
+ id | dt | value 
+----+----+-------
+(0 rows)
+
+ROLLBACK;
+/* no partitions for this 'dt' */
+EXPLAIN (COSTS OFF) UPDATE test.range_rel SET value = 222 WHERE dt = '1990-01-01';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Update on range_rel
+   ->  Seq Scan on range_rel
+         Filter: (dt = 'Mon Jan 01 00:00:00 1990'::timestamp without time zone)
+(3 rows)
+
+BEGIN;
+UPDATE test.range_rel SET value = 111 WHERE dt = '1990-01-01';
+SELECT * FROM test.range_rel WHERE dt = '1990-01-01';
+ id | dt | value 
+----+----+-------
+(0 rows)
+
+ROLLBACK;
+/* no partitions for this 'dt' */
+EXPLAIN (COSTS OFF) DELETE FROM test.range_rel WHERE dt < '1990-01-01';
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Delete on range_rel
+   ->  Seq Scan on range_rel
+         Filter: (dt < 'Mon Jan 01 00:00:00 1990'::timestamp without time zone)
+(3 rows)
+
+BEGIN;
+DELETE FROM test.range_rel WHERE dt < '1990-01-01';
+SELECT * FROM test.range_rel WHERE dt < '1990-01-01';
+ id | dt | value 
+----+----+-------
+(0 rows)
+
+ROLLBACK;
+/* UPDATE + FROM, partitioned table */
+EXPLAIN (COSTS OFF)
+UPDATE test.range_rel r SET value = t.value
+FROM test.tmp t WHERE r.dt = '2010-01-01' AND r.id = t.id;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Update on _test_1_range_rel r
+   ->  Nested Loop
+         Join Filter: (r.id = t.id)
+         ->  Index Scan using _test_1_range_rel_pkey on _test_1_range_rel r
+               Filter: (dt = 'Fri Jan 01 00:00:00 2010'::timestamp without time zone)
+         ->  Seq Scan on tmp t
+(6 rows)
+
+BEGIN;
+UPDATE test.range_rel r SET value = t.value
+FROM test.tmp t WHERE r.dt = '2010-01-01' AND r.id = t.id;
+ROLLBACK;
+/* UPDATE + FROM, single table */
+EXPLAIN (COSTS OFF)
+UPDATE test.tmp t SET value = r.value
+FROM test.range_rel r WHERE r.dt = '2010-01-01' AND r.id = t.id;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Update on tmp t
+   ->  Nested Loop
+         ->  Seq Scan on tmp t
+         ->  Append
+               ->  Index Scan using _test_1_range_rel_pkey on _test_1_range_rel r
+                     Index Cond: (id = t.id)
+                     Filter: (dt = 'Fri Jan 01 00:00:00 2010'::timestamp without time zone)
+(7 rows)
+
+BEGIN;
+UPDATE test.tmp t SET value = r.value
+FROM test.range_rel r WHERE r.dt = '2010-01-01' AND r.id = t.id;
+ROLLBACK;
+/* DELETE + USING, partitioned table */
+EXPLAIN (COSTS OFF)
+DELETE FROM test.range_rel r USING test.tmp t
+WHERE r.dt = '2010-01-02' AND r.id = t.id;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Delete on _test_1_range_rel r
+   ->  Nested Loop
+         Join Filter: (r.id = t.id)
+         ->  Index Scan using _test_1_range_rel_pkey on _test_1_range_rel r
+               Filter: (dt = 'Sat Jan 02 00:00:00 2010'::timestamp without time zone)
+         ->  Seq Scan on tmp t
+(6 rows)
+
+BEGIN;
+DELETE FROM test.range_rel r USING test.tmp t
+WHERE r.dt = '2010-01-02' AND r.id = t.id;
+ROLLBACK;
+/* DELETE + USING, single table */
+EXPLAIN (COSTS OFF)
+DELETE FROM test.tmp t USING test.range_rel r
+WHERE r.dt = '2010-01-02' AND r.id = t.id;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Delete on tmp t
+   ->  Nested Loop
+         ->  Seq Scan on tmp t
+         ->  Append
+               ->  Index Scan using _test_1_range_rel_pkey on _test_1_range_rel r
+                     Index Cond: (id = t.id)
+                     Filter: (dt = 'Sat Jan 02 00:00:00 2010'::timestamp without time zone)
+(7 rows)
+
+BEGIN;
+DELETE FROM test.tmp t USING test.range_rel r
+WHERE r.dt = '2010-01-02' AND r.id = t.id;
+ROLLBACK;
+/* DELETE + USING, two partitioned tables */
+EXPLAIN (COSTS OFF)
+DELETE FROM test.range_rel r USING test.tmp2 t
+WHERE t.id = r.id;
+ERROR:  DELETE and UPDATE queries with a join of partitioned tables are not supported
+BEGIN;
+DELETE FROM test.range_rel r USING test.tmp2 t
+WHERE t.id = r.id;
+ERROR:  DELETE and UPDATE queries with a join of partitioned tables are not supported
+ROLLBACK;
+/* DELETE + USING, partitioned table + two partitioned tables in subselect */
+EXPLAIN (COSTS OFF)
+DELETE FROM test.range_rel r
+USING (SELECT *
+	   FROM test.tmp2 a1
+	   JOIN test.tmp2 a2
+	   USING(id)) t
+WHERE t.id = r.id;
+ERROR:  DELETE and UPDATE queries with a join of partitioned tables are not supported
+BEGIN;
+DELETE FROM test.range_rel r
+USING (SELECT *
+	   FROM test.tmp2 a1
+	   JOIN test.tmp2 a2
+	   USING(id)) t
+WHERE t.id = r.id;
+ERROR:  DELETE and UPDATE queries with a join of partitioned tables are not supported
+ROLLBACK;
+/* DELETE + USING, single table + two partitioned tables in subselect */
+EXPLAIN (COSTS OFF)
+DELETE FROM test.tmp r
+USING (SELECT *
+	   FROM test.tmp2 a1
+	   JOIN test.tmp2 a2
+	   USING(id)) t
+WHERE t.id = r.id;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Delete on tmp r
+   ->  Nested Loop
+         ->  Nested Loop
+               ->  Seq Scan on tmp r
+               ->  Custom Scan (RuntimeAppend)
+                     Prune by: (r.id = a1.id)
+                     ->  Seq Scan on _test_1_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_2_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_3_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_4_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_5_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_6_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_7_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_8_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_9_tmp2 a1
+                           Filter: (r.id = id)
+                     ->  Seq Scan on _test_10_tmp2 a1
+                           Filter: (r.id = id)
+         ->  Custom Scan (RuntimeAppend)
+               Prune by: (a1.id = a2.id)
+               ->  Seq Scan on _test_1_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_2_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_3_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_4_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_5_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_6_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_7_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_8_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_9_tmp2 a2
+                     Filter: (a1.id = id)
+               ->  Seq Scan on _test_10_tmp2 a2
+                     Filter: (a1.id = id)
+(48 rows)
+
+BEGIN;
+DELETE FROM test.tmp r
+USING (SELECT *
+	   FROM test.tmp2 a1
+	   JOIN test.tmp2 a2
+	   USING(id)) t
+WHERE t.id = r.id;
+ROLLBACK;
+/* UPDATE + FROM, two partitioned tables */
+EXPLAIN (COSTS OFF)
+UPDATE test.range_rel r SET value = 1 FROM test.tmp2 t
+WHERE t.id = r.id;
+ERROR:  DELETE and UPDATE queries with a join of partitioned tables are not supported
+BEGIN;
+UPDATE test.range_rel r SET value = 1 FROM test.tmp2 t
+WHERE t.id = r.id;
+ERROR:  DELETE and UPDATE queries with a join of partitioned tables are not supported
+ROLLBACK;
+/*
+ * UPDATE + subquery with partitioned table (PG 9.5).
+ * See pg_catalog_rel_pathlist_hook() + RELOPT_OTHER_MEMBER_REL.
+ */
+EXPLAIN (COSTS OFF)
+UPDATE test.tmp t SET value = 2
+WHERE t.id IN (SELECT id
+			   FROM test.tmp2 t2
+			   WHERE id = t.id);
+                    QUERY PLAN                    
+--------------------------------------------------
+ Update on tmp t
+   ->  Seq Scan on tmp t
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Custom Scan (RuntimeAppend)
+                 Prune by: (t2.id = t.id)
+                 ->  Seq Scan on _test_1_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_2_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_3_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_4_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_5_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_6_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_7_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_8_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_9_tmp2 t2
+                       Filter: (id = t.id)
+                 ->  Seq Scan on _test_10_tmp2 t2
+                       Filter: (id = t.id)
+(26 rows)
+
+/* Test special rule for CTE; SELECT (PostgreSQL 9.5) */
+EXPLAIN (COSTS OFF)
+WITH q AS (SELECT * FROM test.range_rel r
+		   WHERE r.dt = '2010-01-02')
+DELETE FROM test.tmp USING q;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Delete on tmp
+   CTE q
+     ->  Append
+           ->  Seq Scan on _test_1_range_rel r
+                 Filter: (dt = 'Sat Jan 02 00:00:00 2010'::timestamp without time zone)
+   ->  Nested Loop
+         ->  Seq Scan on tmp
+         ->  CTE Scan on q
+(8 rows)
+
+BEGIN;
+WITH q AS (SELECT * FROM test.range_rel r
+		   WHERE r.dt = '2010-01-02')
+DELETE FROM test.tmp USING q;
+ROLLBACK;
+/* Test special rule for CTE; DELETE (PostgreSQL 9.5) */
+EXPLAIN (COSTS OFF)
+WITH q AS (DELETE FROM test.range_rel r
+		   WHERE r.dt = '2010-01-02'
+		   RETURNING *)
+DELETE FROM test.tmp USING q;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Delete on tmp
+   CTE q
+     ->  Delete on _test_1_range_rel r
+           ->  Seq Scan on _test_1_range_rel r
+                 Filter: (dt = 'Sat Jan 02 00:00:00 2010'::timestamp without time zone)
+   ->  Nested Loop
+         ->  Seq Scan on tmp
+         ->  CTE Scan on q
+(8 rows)
+
+BEGIN;
+WITH q AS (DELETE FROM test.range_rel r
+		   WHERE r.dt = '2010-01-02'
+		   RETURNING *)
+DELETE FROM test.tmp USING q;
+ROLLBACK;
+/* Test special rule for CTE; DELETE + USING (PostgreSQL 9.5) */
+EXPLAIN (COSTS OFF)
+WITH q AS (DELETE FROM test.tmp t
+		   USING test.range_rel r
+		   WHERE r.dt = '2010-01-02' AND r.id = t.id
+		   RETURNING *)
+DELETE FROM test.tmp USING q;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Delete on tmp
+   CTE q
+     ->  Delete on tmp t
+           ->  Nested Loop
+                 ->  Seq Scan on tmp t
+                 ->  Append
+                       ->  Index Scan using _test_1_range_rel_pkey on _test_1_range_rel r
+                             Index Cond: (id = t.id)
+                             Filter: (dt = 'Sat Jan 02 00:00:00 2010'::timestamp without time zone)
+   ->  Nested Loop
+         ->  Seq Scan on tmp
+         ->  CTE Scan on q
+(12 rows)
+
+BEGIN;
+WITH q AS (DELETE FROM test.tmp t
+		   USING test.range_rel r
+		   WHERE r.dt = '2010-01-02' AND r.id = t.id
+		   RETURNING *)
+DELETE FROM test.tmp USING q;
+ROLLBACK;
+/* Test special rule for CTE; Nested CTEs (PostgreSQL 9.5) */
+EXPLAIN (COSTS OFF)
+WITH q AS (WITH n AS (SELECT id FROM test.tmp2 WHERE id = 2)
+		   DELETE FROM test.tmp t
+		   USING n
+		   WHERE t.id = n.id
+		   RETURNING *)
+DELETE FROM test.tmp USING q;
+                   QUERY PLAN                   
+------------------------------------------------
+ Delete on tmp
+   CTE q
+     ->  Delete on tmp t
+           CTE n
+             ->  Append
+                   ->  Seq Scan on _test_2_tmp2
+                         Filter: (id = 2)
+           ->  Nested Loop
+                 Join Filter: (t.id = n.id)
+                 ->  Seq Scan on tmp t
+                 ->  CTE Scan on n
+   ->  Nested Loop
+         ->  Seq Scan on tmp
+         ->  CTE Scan on q
+(14 rows)
+
+/* Test special rule for CTE; CTE in quals (PostgreSQL 9.5) */
+EXPLAIN (COSTS OFF)
+WITH q AS (SELECT id FROM test.tmp2
+		   WHERE id < 3)
+DELETE FROM test.tmp t WHERE t.id in (SELECT id FROM q);
+               QUERY PLAN               
+----------------------------------------
+ Delete on tmp t
+   CTE q
+     ->  Append
+           ->  Seq Scan on _test_1_tmp2
+           ->  Seq Scan on _test_2_tmp2
+   ->  Nested Loop Semi Join
+         Join Filter: (t.id = q.id)
+         ->  Seq Scan on tmp t
+         ->  CTE Scan on q
+(9 rows)
+
+BEGIN;
+WITH q AS (SELECT id FROM test.tmp2
+		   WHERE id < 3)
+DELETE FROM test.tmp t WHERE t.id in (SELECT id FROM q);
+ROLLBACK;
+DROP SCHEMA test CASCADE;
+NOTICE:  drop cascades to 27 other objects
+DROP EXTENSION gogudb CASCADE;

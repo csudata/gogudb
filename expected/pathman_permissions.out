@@ -1,0 +1,241 @@
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA permissions;
+CREATE ROLE user1 LOGIN;
+CREATE ROLE user2 LOGIN;
+GRANT USAGE, CREATE ON SCHEMA permissions TO user1;
+GRANT USAGE, CREATE ON SCHEMA permissions TO user2;
+GRANT USAGE, CREATE ON SCHEMA gogudb_partition_table TO user1;
+GRANT USAGE, CREATE ON SCHEMA gogudb_partition_table TO user2;
+/* Switch to #1 */
+SET ROLE user1;
+CREATE TABLE permissions.user1_table(id serial, a int);
+INSERT INTO permissions.user1_table SELECT g, g FROM generate_series(1, 20) as g;
+/* Should fail (can't SELECT) */
+SET ROLE user2;
+SELECT _gogu.create_range_partitions('permissions.user1_table', 'id', 1, 10, 2);
+ERROR:  permission denied for relation user1_table
+/* Grant SELECT to user2 */
+SET ROLE user1;
+GRANT SELECT ON permissions.user1_table TO user2;
+/* Should fail (don't own parent) */
+SET ROLE user2;
+SELECT _gogu.create_range_partitions('permissions.user1_table', 'id', 1, 10, 2);
+ERROR:  only the owner or superuser can change partitioning configuration of table "user1_table"
+/* Should be ok */
+SET ROLE user1;
+SELECT _gogu.create_range_partitions('permissions.user1_table', 'id', 1, 10, 2);
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+/* Should be able to see */
+SET ROLE user2;
+SELECT * FROM _gogu.gogudb_config;
+         partrel         | expr | parttype | range_interval |                                                      cooked_expr                                                      
+-------------------------+------+----------+----------------+-----------------------------------------------------------------------------------------------------------------------
+ permissions.user1_table | id   |        2 | 10             | {VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 8}
+(1 row)
+
+SELECT * FROM _gogu.gogudb_config_params;
+         partrel         | enable_parent | auto | init_callback | spawn_using_bgw 
+-------------------------+---------------+------+---------------+-----------------
+ permissions.user1_table | f             | t    |               | f
+(1 row)
+
+/* Should fail */
+SET ROLE user2;
+SELECT _gogu.set_enable_parent('permissions.user1_table', true);
+WARNING:  only the owner or superuser can change partitioning configuration of table "user1_table"
+ERROR:  new row violates row-level security policy for table "gogudb_config_params"
+SELECT _gogu.set_auto('permissions.user1_table', false);
+WARNING:  only the owner or superuser can change partitioning configuration of table "user1_table"
+ERROR:  new row violates row-level security policy for table "gogudb_config_params"
+/* Should fail */
+SET ROLE user2;
+DELETE FROM _gogu.gogudb_config
+WHERE partrel = 'permissions.user1_table'::regclass;
+WARNING:  only the owner or superuser can change partitioning configuration of table "user1_table"
+/* No rights to insert, should fail */
+SET ROLE user2;
+INSERT INTO permissions.user1_table (id, a) VALUES (35, 0);
+ERROR:  permission denied for relation user1_table
+/* No rights to create partitions (need INSERT privilege) */
+SET ROLE user2;
+SELECT _gogu.prepend_range_partition('permissions.user1_table');
+ERROR:  permission denied for parent relation "user1_table"
+/* Allow user2 to create partitions */
+SET ROLE user1;
+GRANT INSERT ON permissions.user1_table TO user2;
+GRANT UPDATE(a) ON permissions.user1_table TO user2; /* per-column ACL */
+/* Should be able to prepend a partition */
+SET ROLE user2;
+SELECT _gogu.prepend_range_partition('permissions.user1_table');
+              prepend_range_partition              
+---------------------------------------------------
+ gogudb_partition_table._permissions_4_user1_table
+(1 row)
+
+SELECT attname, attacl FROM pg_attribute
+WHERE attrelid = (SELECT "partition" FROM _gogu.gogudb_partition_list
+				  WHERE parent = 'permissions.user1_table'::REGCLASS
+				  ORDER BY range_min::int ASC /* prepend */
+				  LIMIT 1)
+ORDER BY attname; /* check ACL for each column */
+ attname  |     attacl      
+----------+-----------------
+ a        | {user2=w/user1}
+ cmax     | 
+ cmin     | 
+ ctid     | 
+ id       | 
+ tableoid | 
+ xmax     | 
+ xmin     | 
+(8 rows)
+
+/* Have rights, should be ok (parent's ACL is shared by new children) */
+SET ROLE user2;
+INSERT INTO permissions.user1_table (id, a) VALUES (35, 0) RETURNING *;
+ id | a 
+----+---
+ 35 | 0
+(1 row)
+
+SELECT relname, relacl FROM pg_class
+WHERE oid = ANY (SELECT "partition" FROM _gogu.gogudb_partition_list
+				 WHERE parent = 'permissions.user1_table'::REGCLASS
+				 ORDER BY range_max::int DESC /* append */
+				 LIMIT 3)
+ORDER BY relname; /* we also check ACL for "user1_table_2" */
+          relname           |                relacl                
+----------------------------+--------------------------------------
+ _permissions_2_user1_table | {user1=arwdDxt/user1,user2=r/user1}
+ _permissions_5_user1_table | {user1=arwdDxt/user1,user2=ar/user1}
+ _permissions_6_user1_table | {user1=arwdDxt/user1,user2=ar/user1}
+(3 rows)
+
+/* Try to drop partition, should fail */
+SELECT _gogu.drop_range_partition('gogudb_partition_table._permissions_4_user1_table');
+ERROR:  must be owner of relation _permissions_4_user1_table
+/* Disable automatic partition creation */
+SET ROLE user1;
+SELECT _gogu.set_auto('permissions.user1_table', false);
+ set_auto 
+----------
+ 
+(1 row)
+
+/* Partition creation, should fail */
+SET ROLE user2;
+INSERT INTO permissions.user1_table (id, a) VALUES (55, 0) RETURNING *;
+ERROR:  no suitable partition for key '55'
+/* Finally drop partitions */
+SET ROLE user1;
+SELECT _gogu.drop_partitions('permissions.user1_table');
+NOTICE:  10 rows copied from gogudb_partition_table._permissions_1_user1_table
+NOTICE:  10 rows copied from gogudb_partition_table._permissions_2_user1_table
+NOTICE:  0 rows copied from gogudb_partition_table._permissions_4_user1_table
+NOTICE:  0 rows copied from gogudb_partition_table._permissions_5_user1_table
+NOTICE:  1 rows copied from gogudb_partition_table._permissions_6_user1_table
+ drop_partitions 
+-----------------
+               5
+(1 row)
+
+/* Switch to #2 */
+SET ROLE user2;
+/* Test ddl event trigger */
+CREATE TABLE permissions.user2_table(id serial);
+SELECT _gogu.create_hash_partitions('permissions.user2_table', 'id', 3);
+ create_hash_partitions 
+------------------------
+                      3
+(1 row)
+
+INSERT INTO permissions.user2_table SELECT generate_series(1, 30);
+SELECT _gogu.drop_partitions('permissions.user2_table');
+NOTICE:  8 rows copied from gogudb_partition_table._permissions_0_user2_table
+NOTICE:  11 rows copied from gogudb_partition_table._permissions_1_user2_table
+NOTICE:  11 rows copied from gogudb_partition_table._permissions_2_user2_table
+ drop_partitions 
+-----------------
+               3
+(1 row)
+
+/* Switch to #1 */
+SET ROLE user1;
+CREATE TABLE permissions.dropped_column(a int, val int not null, b int, c int);
+INSERT INTO permissions.dropped_column SELECT i,i,i,i FROM generate_series(1, 30) i;
+GRANT SELECT(val), INSERT(val) ON permissions.dropped_column TO user2;
+SELECT _gogu.create_range_partitions('permissions.dropped_column', 'val', 1, 10);
+ create_range_partitions 
+-------------------------
+                       3
+(1 row)
+
+SELECT attrelid::regclass, attname, attacl FROM pg_attribute
+WHERE attrelid = ANY (SELECT "partition" FROM _gogu.gogudb_partition_list
+					  WHERE parent = 'permissions.dropped_column'::REGCLASS)
+	  AND attacl IS NOT NULL
+ORDER BY attrelid::regclass::text; /* check ACL for each column */
+                       attrelid                       | attname |      attacl      
+------------------------------------------------------+---------+------------------
+ gogudb_partition_table._permissions_1_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_2_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_3_dropped_column | val     | {user2=ar/user1}
+(3 rows)
+
+ALTER TABLE permissions.dropped_column DROP COLUMN a; /* DROP "a" */
+SELECT _gogu.append_range_partition('permissions.dropped_column');
+                append_range_partition                
+------------------------------------------------------
+ gogudb_partition_table._permissions_4_dropped_column
+(1 row)
+
+SELECT attrelid::regclass, attname, attacl FROM pg_attribute
+WHERE attrelid = ANY (SELECT "partition" FROM _gogu.gogudb_partition_list
+					  WHERE parent = 'permissions.dropped_column'::REGCLASS)
+	  AND attacl IS NOT NULL
+ORDER BY attrelid::regclass::text; /* check ACL for each column (+1 partition) */
+                       attrelid                       | attname |      attacl      
+------------------------------------------------------+---------+------------------
+ gogudb_partition_table._permissions_1_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_2_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_3_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_4_dropped_column | val     | {user2=ar/user1}
+(4 rows)
+
+ALTER TABLE permissions.dropped_column DROP COLUMN b; /* DROP "b" */
+SELECT _gogu.append_range_partition('permissions.dropped_column');
+                append_range_partition                
+------------------------------------------------------
+ gogudb_partition_table._permissions_5_dropped_column
+(1 row)
+
+SELECT attrelid::regclass, attname, attacl FROM pg_attribute
+WHERE attrelid = ANY (SELECT "partition" FROM _gogu.gogudb_partition_list
+					  WHERE parent = 'permissions.dropped_column'::REGCLASS)
+	  AND attacl IS NOT NULL
+ORDER BY attrelid::regclass::text; /* check ACL for each column (+1 partition) */
+                       attrelid                       | attname |      attacl      
+------------------------------------------------------+---------+------------------
+ gogudb_partition_table._permissions_1_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_2_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_3_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_4_dropped_column | val     | {user2=ar/user1}
+ gogudb_partition_table._permissions_5_dropped_column | val     | {user2=ar/user1}
+(5 rows)
+
+DROP TABLE permissions.dropped_column CASCADE;
+NOTICE:  drop cascades to 6 other objects
+/* Finally reset user */
+RESET ROLE;
+DROP OWNED BY user1;
+DROP OWNED BY user2;
+DROP USER user1;
+DROP USER user2;
+DROP SCHEMA permissions CASCADE;
+DROP EXTENSION gogudb;

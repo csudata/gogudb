@@ -1,0 +1,63 @@
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA test_updates;
+/*
+ * Test UPDATEs on a partition with different TupleDescriptor.
+ */
+/* create partitioned table */
+CREATE TABLE test_updates.test(a FLOAT4, val INT4 NOT NULL, b FLOAT8);
+INSERT INTO test_updates.test SELECT i, i, i FROM generate_series(1, 100) AS i;
+SELECT create_range_partitions('test_updates.test', 'val', 1, 10);
+ create_range_partitions 
+-------------------------
+                      10
+(1 row)
+
+/* drop column 'a' */
+ALTER TABLE test_updates.test DROP COLUMN a;
+/* append new partition */
+SELECT append_range_partition('test_updates.test');
+            append_range_partition            
+----------------------------------------------
+ gogudb_partition_table._test_updates_11_test
+(1 row)
+
+INSERT INTO gogudb_partition_table._test_updates_11_test (val, b) VALUES (101, 10);
+/* tuple descs are the same */
+EXPLAIN (COSTS OFF) UPDATE test_updates.test SET b = 0 WHERE val = 1;
+               QUERY PLAN               
+----------------------------------------
+ Update on _test_updates_1_test
+   ->  Seq Scan on _test_updates_1_test
+         Filter: (val = 1)
+(3 rows)
+
+UPDATE test_updates.test SET b = 0 WHERE val = 1 RETURNING *, tableoid::REGCLASS;
+ val | b |                  tableoid                   
+-----+---+---------------------------------------------
+   1 | 0 | gogudb_partition_table._test_updates_1_test
+(1 row)
+
+/* tuple descs are different */
+EXPLAIN (COSTS OFF) UPDATE test_updates.test SET b = 0 WHERE val = 101;
+               QUERY PLAN                
+-----------------------------------------
+ Update on test
+   Update on test
+   Update on _test_updates_11_test
+   ->  Seq Scan on test
+         Filter: (val = 101)
+   ->  Seq Scan on _test_updates_11_test
+         Filter: (val = 101)
+(7 rows)
+
+UPDATE test_updates.test SET b = 0 WHERE val = 101 RETURNING *, tableoid::REGCLASS;
+ val | b |                   tableoid                   
+-----+---+----------------------------------------------
+ 101 | 0 | gogudb_partition_table._test_updates_11_test
+(1 row)
+
+DROP SCHEMA test_updates CASCADE;
+NOTICE:  drop cascades to 13 other objects
+DROP EXTENSION gogudb;

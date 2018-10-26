@@ -1,0 +1,580 @@
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+DO $d$
+    BEGIN
+        EXECUTE $$CREATE SERVER server_remote1 FOREIGN DATA WRAPPER gogudb_fdw
+            OPTIONS (dbname '$$||current_database()||$$',
+                     port '$$||current_setting('port')||$$'
+            )$$;
+        EXECUTE $$CREATE SERVER server_remote2 FOREIGN DATA WRAPPER gogudb_fdw
+            OPTIONS (dbname '$$||current_database()||$$',
+                     port '$$||current_setting('port')||$$'
+            )$$;
+    END;
+$d$;
+CREATE USER MAPPING FOR CURRENT_USER SERVER server_remote1;
+CREATE USER MAPPING FOR CURRENT_USER SERVER server_remote2;
+insert into server_map values('server_remote1', 0, 64), ('server_remote2', 64, 128);
+select reload_range_server_set();
+ reload_range_server_set 
+-------------------------
+ OK, load server_map
+(1 row)
+
+/* expect warning, but still can create hash partition on server_remote1 and server_remote2 */
+insert into server_map values('err_server_remote3', 0, 64), ('err_server_remote4', 64, 128);
+select reload_range_server_set();
+WARNING:  Found hash range overlap or hole between server_remote1:[0  64) and err_server_remote3:[0 64) 
+                   reload_range_server_set                   
+-------------------------------------------------------------
+ Failed to load server_map, please check tuple in server_map
+(1 row)
+
+/* support range partitioned by time column */
+insert into  table_partition_rule(schema_name ,table_name ,part_expr ,part_type ,range_interval ,
+				range_start ,part_dist, remote_schema) 
+	values('public', 'part_range_time_test', 'crt_time', 2, '2 month','2018-1-1 00:00:0', 6, 'public');
+/* support range partitioned by time column */
+insert into table_partition_rule(schema_name, table_name, part_expr, part_type, part_dist, remote_schema,
+				range_interval,range_start) 
+	values('public', 'part_range_num_test', 'id', 2, 4, 'public', '100', '0');
+/* support hash partitioned */
+insert into table_partition_rule(schema_name, table_name, part_expr, part_type, part_dist, remote_schema)
+	 values('public', 'part_hash_test', 'id', 1,4,'public');
+CREATE TABLE part_range_time_test(id int, info text, crt_time timestamp not null);
+CREATE TABLE part_range_num_test ( id integer NOT NULL, k integer DEFAULT 0 NOT NULL);
+CREATE TABLE part_hash_test(id INT NOT NULL, payload REAL);
+\d+ part_range_num_test
+                            Table "public.part_range_num_test"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id     | integer |           | not null |         | plain   |              | 
+ k      | integer |           | not null | 0       | plain   |              | 
+Child tables: gogudb_partition_table._public_1_part_range_num_test,
+              gogudb_partition_table._public_2_part_range_num_test,
+              gogudb_partition_table._public_3_part_range_num_test,
+              gogudb_partition_table._public_4_part_range_num_test
+
+\d+ part_range_time_test
+                                       Table "public.part_range_time_test"
+  Column  |            Type             | Collation | Nullable | Default | Storage  | Stats target | Description 
+----------+-----------------------------+-----------+----------+---------+----------+--------------+-------------
+ id       | integer                     |           |          |         | plain    |              | 
+ info     | text                        |           |          |         | extended |              | 
+ crt_time | timestamp without time zone |           | not null |         | plain    |              | 
+Child tables: gogudb_partition_table._public_1_part_range_time_test,
+              gogudb_partition_table._public_2_part_range_time_test,
+              gogudb_partition_table._public_3_part_range_time_test,
+              gogudb_partition_table._public_4_part_range_time_test,
+              gogudb_partition_table._public_5_part_range_time_test,
+              gogudb_partition_table._public_6_part_range_time_test
+
+\d+ part_hash_test
+                               Table "public.part_hash_test"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ id      | integer |           | not null |         | plain   |              | 
+ payload | real    |           |          |         | plain   |              | 
+Child tables: gogudb_partition_table._public_0_part_hash_test,
+              gogudb_partition_table._public_1_part_hash_test,
+              gogudb_partition_table._public_2_part_hash_test,
+              gogudb_partition_table._public_3_part_hash_test
+
+CREATE INDEX crt_time_index ON part_range_time_test(crt_time);
+CREATE INDEX k_index ON part_range_num_test(k);
+CREATE INDEX id_index ON part_hash_test(id);
+INSERT INTO part_range_time_test SELECT id,md5(random()::text),clock_timestamp() + (id||' hour')::interval 
+			FROM generate_series(1,10000) t(id);
+INSERT INTO part_range_num_test SELECT id, random() FROM generate_series(1,399) t(id);
+INSERT INTO part_hash_test SELECT id, random() FROM generate_series(1,100) t(id);
+SELECT COUNT(*) FROM part_range_time_test;
+ count 
+-------
+ 10000
+(1 row)
+
+SELECT COUNT(*) FROM part_range_num_test;
+ count 
+-------
+   399
+(1 row)
+
+SELECT COUNT(*) FROM part_hash_test;
+ count 
+-------
+   100
+(1 row)
+
+SELECT count(*) FROM gogudb_partition_table._public_0_part_hash_test;
+ count 
+-------
+    13
+(1 row)
+
+SELECT count(*) FROM gogudb_partition_table._public_1_part_hash_test;
+ count 
+-------
+    37
+(1 row)
+
+SELECT count(*) FROM gogudb_partition_table._public_2_part_hash_test;
+ count 
+-------
+    27
+(1 row)
+
+SELECT count(*) FROM gogudb_partition_table._public_3_part_hash_test;
+ count 
+-------
+    23
+(1 row)
+
+explain (COSTS OFF) select * from part_range_time_test;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_1_part_range_time_test
+   ->  Foreign Scan on _public_2_part_range_time_test
+   ->  Foreign Scan on _public_3_part_range_time_test
+   ->  Foreign Scan on _public_4_part_range_time_test
+   ->  Foreign Scan on _public_5_part_range_time_test
+   ->  Foreign Scan on _public_6_part_range_time_test
+   ->  Foreign Scan on _public_7_part_range_time_test
+   ->  Foreign Scan on _public_8_part_range_time_test
+   ->  Foreign Scan on _public_9_part_range_time_test
+   ->  Foreign Scan on _public_10_part_range_time_test
+   ->  Foreign Scan on _public_11_part_range_time_test
+   ->  Foreign Scan on _public_12_part_range_time_test
+(13 rows)
+
+explain (COSTS OFF) select * from part_range_num_test;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_1_part_range_num_test
+   ->  Foreign Scan on _public_2_part_range_num_test
+   ->  Foreign Scan on _public_3_part_range_num_test
+   ->  Foreign Scan on _public_4_part_range_num_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_2_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_3_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 3;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 4;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_1_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 5;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_3_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 6;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_3_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 7;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_3_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id = 8;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+(2 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id > 9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id < 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id != 11;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id >= 9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id <= 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id >= 20 and id <= 100;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+explain (COSTS OFF) select * from part_hash_test where id <= 10 or id >= 50;
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Foreign Scan on _public_0_part_hash_test
+   ->  Foreign Scan on _public_1_part_hash_test
+   ->  Foreign Scan on _public_2_part_hash_test
+   ->  Foreign Scan on _public_3_part_hash_test
+(5 rows)
+
+PREPARE q1(int) AS
+	select id from part_hash_test where id = $1;
+EXECUTE q1(1);
+ id 
+----
+  1
+(1 row)
+
+EXECUTE q1(2);
+ id 
+----
+  2
+(1 row)
+
+EXECUTE q1(3);
+ id 
+----
+  3
+(1 row)
+
+EXECUTE q1(4);
+ id 
+----
+  4
+(1 row)
+
+EXECUTE q1(5);
+ id 
+----
+  5
+(1 row)
+
+EXECUTE q1(6);
+ id 
+----
+  6
+(1 row)
+
+CLUSTER part_range_time_test USING crt_time_index;
+CLUSTER part_range_num_test USING k_index;
+CLUSTER part_hash_test USING id_index;
+REINDEX TABLE part_range_num_test;
+REINDEX INDEX crt_time_index ;
+REINDEX INDEX k_index ;
+REINDEX INDEX id_index ;
+truncate part_range_time_test;
+truncate part_range_num_test;
+truncate ONLY part_hash_test;
+VACUUM FULL part_range_time_test;
+VACUUM FULL part_range_num_test;
+VACUUM FULL part_hash_test;
+SELECT COUNT(*) FROM part_range_time_test; 
+ count 
+-------
+     0
+(1 row)
+
+alter table part_range_time_test add column name text;
+alter table part_range_num_test add column name text;
+alter table part_hash_test add column name text;
+\d+ part_range_time_test
+                                       Table "public.part_range_time_test"
+  Column  |            Type             | Collation | Nullable | Default | Storage  | Stats target | Description 
+----------+-----------------------------+-----------+----------+---------+----------+--------------+-------------
+ id       | integer                     |           |          |         | plain    |              | 
+ info     | text                        |           |          |         | extended |              | 
+ crt_time | timestamp without time zone |           | not null |         | plain    |              | 
+ name     | text                        |           |          |         | extended |              | 
+Indexes:
+    "crt_time_index" btree (crt_time) CLUSTER
+Child tables: gogudb_partition_table._public_10_part_range_time_test,
+              gogudb_partition_table._public_11_part_range_time_test,
+              gogudb_partition_table._public_12_part_range_time_test,
+              gogudb_partition_table._public_1_part_range_time_test,
+              gogudb_partition_table._public_2_part_range_time_test,
+              gogudb_partition_table._public_3_part_range_time_test,
+              gogudb_partition_table._public_4_part_range_time_test,
+              gogudb_partition_table._public_5_part_range_time_test,
+              gogudb_partition_table._public_6_part_range_time_test,
+              gogudb_partition_table._public_7_part_range_time_test,
+              gogudb_partition_table._public_8_part_range_time_test,
+              gogudb_partition_table._public_9_part_range_time_test
+
+\d+ part_range_num_test
+                            Table "public.part_range_num_test"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ id     | integer |           | not null |         | plain    |              | 
+ k      | integer |           | not null | 0       | plain    |              | 
+ name   | text    |           |          |         | extended |              | 
+Indexes:
+    "k_index" btree (k) CLUSTER
+Child tables: gogudb_partition_table._public_1_part_range_num_test,
+              gogudb_partition_table._public_2_part_range_num_test,
+              gogudb_partition_table._public_3_part_range_num_test,
+              gogudb_partition_table._public_4_part_range_num_test
+
+\d+ part_hash_test
+                               Table "public.part_hash_test"
+ Column  |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+---------+---------+-----------+----------+---------+----------+--------------+-------------
+ id      | integer |           | not null |         | plain    |              | 
+ payload | real    |           |          |         | plain    |              | 
+ name    | text    |           |          |         | extended |              | 
+Indexes:
+    "id_index" btree (id) CLUSTER
+Child tables: gogudb_partition_table._public_0_part_hash_test,
+              gogudb_partition_table._public_1_part_hash_test,
+              gogudb_partition_table._public_2_part_hash_test,
+              gogudb_partition_table._public_3_part_hash_test
+
+alter table part_range_time_test alter column name type varchar(30);
+alter table part_range_num_test alter column name type varchar(30);
+alter table part_hash_test alter column name type varchar(30);
+\d+ part_range_time_test
+                                       Table "public.part_range_time_test"
+  Column  |            Type             | Collation | Nullable | Default | Storage  | Stats target | Description 
+----------+-----------------------------+-----------+----------+---------+----------+--------------+-------------
+ id       | integer                     |           |          |         | plain    |              | 
+ info     | text                        |           |          |         | extended |              | 
+ crt_time | timestamp without time zone |           | not null |         | plain    |              | 
+ name     | character varying(30)       |           |          |         | extended |              | 
+Indexes:
+    "crt_time_index" btree (crt_time) CLUSTER
+Child tables: gogudb_partition_table._public_10_part_range_time_test,
+              gogudb_partition_table._public_11_part_range_time_test,
+              gogudb_partition_table._public_12_part_range_time_test,
+              gogudb_partition_table._public_1_part_range_time_test,
+              gogudb_partition_table._public_2_part_range_time_test,
+              gogudb_partition_table._public_3_part_range_time_test,
+              gogudb_partition_table._public_4_part_range_time_test,
+              gogudb_partition_table._public_5_part_range_time_test,
+              gogudb_partition_table._public_6_part_range_time_test,
+              gogudb_partition_table._public_7_part_range_time_test,
+              gogudb_partition_table._public_8_part_range_time_test,
+              gogudb_partition_table._public_9_part_range_time_test
+
+\d+ part_range_num_test
+                                   Table "public.part_range_num_test"
+ Column |         Type          | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+---------+----------+--------------+-------------
+ id     | integer               |           | not null |         | plain    |              | 
+ k      | integer               |           | not null | 0       | plain    |              | 
+ name   | character varying(30) |           |          |         | extended |              | 
+Indexes:
+    "k_index" btree (k) CLUSTER
+Child tables: gogudb_partition_table._public_1_part_range_num_test,
+              gogudb_partition_table._public_2_part_range_num_test,
+              gogudb_partition_table._public_3_part_range_num_test,
+              gogudb_partition_table._public_4_part_range_num_test
+
+\d+ part_hash_test
+                                      Table "public.part_hash_test"
+ Column  |         Type          | Collation | Nullable | Default | Storage  | Stats target | Description 
+---------+-----------------------+-----------+----------+---------+----------+--------------+-------------
+ id      | integer               |           | not null |         | plain    |              | 
+ payload | real                  |           |          |         | plain    |              | 
+ name    | character varying(30) |           |          |         | extended |              | 
+Indexes:
+    "id_index" btree (id) CLUSTER
+Child tables: gogudb_partition_table._public_0_part_hash_test,
+              gogudb_partition_table._public_1_part_hash_test,
+              gogudb_partition_table._public_2_part_hash_test,
+              gogudb_partition_table._public_3_part_hash_test
+
+alter table part_range_time_test drop column name ;
+alter table part_range_num_test drop column name ;
+alter table part_hash_test drop column name ;
+\d+ part_range_time_test
+                                       Table "public.part_range_time_test"
+  Column  |            Type             | Collation | Nullable | Default | Storage  | Stats target | Description 
+----------+-----------------------------+-----------+----------+---------+----------+--------------+-------------
+ id       | integer                     |           |          |         | plain    |              | 
+ info     | text                        |           |          |         | extended |              | 
+ crt_time | timestamp without time zone |           | not null |         | plain    |              | 
+Indexes:
+    "crt_time_index" btree (crt_time) CLUSTER
+Child tables: gogudb_partition_table._public_10_part_range_time_test,
+              gogudb_partition_table._public_11_part_range_time_test,
+              gogudb_partition_table._public_12_part_range_time_test,
+              gogudb_partition_table._public_1_part_range_time_test,
+              gogudb_partition_table._public_2_part_range_time_test,
+              gogudb_partition_table._public_3_part_range_time_test,
+              gogudb_partition_table._public_4_part_range_time_test,
+              gogudb_partition_table._public_5_part_range_time_test,
+              gogudb_partition_table._public_6_part_range_time_test,
+              gogudb_partition_table._public_7_part_range_time_test,
+              gogudb_partition_table._public_8_part_range_time_test,
+              gogudb_partition_table._public_9_part_range_time_test
+
+\d+ part_range_num_test
+                            Table "public.part_range_num_test"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id     | integer |           | not null |         | plain   |              | 
+ k      | integer |           | not null | 0       | plain   |              | 
+Indexes:
+    "k_index" btree (k) CLUSTER
+Child tables: gogudb_partition_table._public_1_part_range_num_test,
+              gogudb_partition_table._public_2_part_range_num_test,
+              gogudb_partition_table._public_3_part_range_num_test,
+              gogudb_partition_table._public_4_part_range_num_test
+
+\d+ part_hash_test
+                               Table "public.part_hash_test"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ id      | integer |           | not null |         | plain   |              | 
+ payload | real    |           |          |         | plain   |              | 
+Indexes:
+    "id_index" btree (id) CLUSTER
+Child tables: gogudb_partition_table._public_0_part_hash_test,
+              gogudb_partition_table._public_1_part_hash_test,
+              gogudb_partition_table._public_2_part_hash_test,
+              gogudb_partition_table._public_3_part_hash_test
+
+/* Following expect error */
+/* For rename */
+alter schema public  rename to my_schema;
+ERROR:  Cannot rename schema public because it is used by table_partition_rule
+alter foreign table gogudb_partition_table._public_0_part_hash_test rename to new_name;
+ERROR:  Cannot rename foreign table _public_0_part_hash_test because it is depended by public.part_hash_test
+alter table part_hash_test rename to new_name;
+ERROR:  Cannot rename table public.part_hash_test because it is in table partition rule
+alter index crt_time_index rename to my_index;
+ERROR:  Cannot rename index crt_time_index because it is used by partition table
+alter table part_hash_test rename id to my_id;
+ERROR:  Cannot rename column id of public.part_hash_test because table in table partition rule
+/* For creat temp table */
+insert into table_partition_rule(schema_name, table_name, part_expr, part_type, part_dist, remote_schema)
+	 values('public', 'part_hash_test_xx', 'id', 1,4,'public');
+create temp table part_hash_test_xx(id int);
+create table part_hash_test_xx as select * from part_hash_test;
+ERROR:  Cannot create table public.part_hash_test_xx by CreateTableAsStmt
+/* For alter foreign table */
+alter foreign table gogudb_partition_table._public_0_part_hash_test drop column id;
+ERROR:  Cannot alter foreign table _public_0_part_hash_test because it depended by public.part_hash_test
+alter foreign table gogudb_partition_table._public_0_part_hash_test add column new_col text;
+ERROR:  Cannot alter foreign table _public_0_part_hash_test because it depended by public.part_hash_test
+/* For alter table schema */
+alter table part_hash_test set schema gogudb_partition_table;
+ERROR:  Cannot alter schema of public.part_hash_test, because it is defined in table partition rule 
+/* For drop foreign table */
+drop foreign table gogudb_partition_table._public_0_part_hash_test;
+ERROR:   Cannot drop table gogudb_partition_table._public_0_part_hash_test because public.part_hash_test depends on it
+CREATE TABLE other_test(id INT NOT NULL, payload REAL);
+drop table other_test, part_range_num_test;
+ERROR:  Cannot drop table without CASCADE, because some table in partition table rule
+drop table other_test;
+/* OK, clean it and quit */
+DROP INDEX crt_time_index ;
+DROP INDEX k_index ;
+DROP INDEX id_index ;
+drop table part_range_time_test, part_range_num_test;
+NOTICE:  drop cascades to 18 other objects
+DETAIL:  drop cascades to sequence part_range_num_test_seq
+drop cascades to foreign table gogudb_partition_table._public_1_part_range_num_test
+drop cascades to foreign table gogudb_partition_table._public_2_part_range_num_test
+drop cascades to foreign table gogudb_partition_table._public_3_part_range_num_test
+drop cascades to foreign table gogudb_partition_table._public_4_part_range_num_test
+drop cascades to sequence part_range_time_test_seq
+drop cascades to foreign table gogudb_partition_table._public_1_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_2_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_3_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_4_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_5_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_6_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_7_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_8_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_9_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_10_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_11_part_range_time_test
+drop cascades to foreign table gogudb_partition_table._public_12_part_range_time_test
+drop table part_hash_test cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to foreign table gogudb_partition_table._public_0_part_hash_test
+drop cascades to foreign table gogudb_partition_table._public_1_part_hash_test
+drop cascades to foreign table gogudb_partition_table._public_2_part_hash_test
+drop cascades to foreign table gogudb_partition_table._public_3_part_hash_test
+DROP EXTENSION gogudb cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to server server_remote1
+drop cascades to user mapping for pgsql on server server_remote1
+drop cascades to server server_remote2
+drop cascades to user mapping for pgsql on server server_remote2

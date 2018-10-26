@@ -1,0 +1,416 @@
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA callbacks;
+/* callback #1 */
+CREATE OR REPLACE FUNCTION callbacks.abc_on_part_created_callback(args JSONB)
+RETURNS VOID AS $$
+BEGIN
+	RAISE WARNING 'callback arg: %', args::TEXT;
+END
+$$ language plpgsql;
+/* callback #2 */
+CREATE OR REPLACE FUNCTION public.dummy_cb(args JSONB)
+RETURNS VOID AS $$
+BEGIN
+END
+$$ language plpgsql;
+CREATE TABLE callbacks.abc(a serial, b int);
+SELECT create_range_partitions('callbacks.abc', 'a', 1, 100, 2);
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+SELECT set_init_callback('callbacks.abc', 'public.dummy_cb(jsonb)');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+/* check that callback is schema-qualified */
+SELECT init_callback FROM gogudb_config_params
+WHERE partrel = 'callbacks.abc'::REGCLASS;
+     init_callback      
+------------------------
+ public.dummy_cb(jsonb)
+(1 row)
+
+/* reset callback */
+SELECT set_init_callback('callbacks.abc');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+/* should return NULL */
+SELECT init_callback FROM gogudb_config_params
+WHERE partrel = 'callbacks.abc'::REGCLASS;
+ init_callback 
+---------------
+ 
+(1 row)
+
+SELECT set_init_callback('callbacks.abc',
+						 'callbacks.abc_on_part_created_callback(jsonb)');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+/* check that callback is schema-qualified */
+SELECT init_callback FROM gogudb_config_params
+WHERE partrel = 'callbacks.abc'::REGCLASS;
+                 init_callback                 
+-----------------------------------------------
+ callbacks.abc_on_part_created_callback(jsonb)
+(1 row)
+
+DROP TABLE callbacks.abc CASCADE;
+NOTICE:  drop cascades to 3 other objects
+/* set callback to be called on RANGE partitions */
+CREATE TABLE callbacks.abc(a serial, b int);
+SELECT create_range_partitions('callbacks.abc', 'a', 1, 100, 2);
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+SELECT set_init_callback('callbacks.abc',
+						 'callbacks.abc_on_part_created_callback(jsonb)');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+INSERT INTO callbacks.abc VALUES (123, 1);
+INSERT INTO callbacks.abc VALUES (223, 1); /* show warning */
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_3_abc", "range_max": "301", "range_min": "201", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+SELECT set_spawn_using_bgw('callbacks.abc', true);
+ set_spawn_using_bgw 
+---------------------
+ 
+(1 row)
+
+SELECT get_number_of_partitions('callbacks.abc');
+ get_number_of_partitions 
+--------------------------
+                        3
+(1 row)
+
+INSERT INTO callbacks.abc VALUES (323, 1);
+SELECT get_number_of_partitions('callbacks.abc'); /* +1 partition (created by BGW) */
+ get_number_of_partitions 
+--------------------------
+                        4
+(1 row)
+
+SELECT set_spawn_using_bgw('callbacks.abc', false);
+ set_spawn_using_bgw 
+---------------------
+ 
+(1 row)
+
+SELECT append_range_partition('callbacks.abc');
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_5_abc", "range_max": "501", "range_min": "401", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+         append_range_partition          
+-----------------------------------------
+ gogudb_partition_table._callbacks_5_abc
+(1 row)
+
+SELECT prepend_range_partition('callbacks.abc');
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_6_abc", "range_max": "1", "range_min": "-99", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+         prepend_range_partition         
+-----------------------------------------
+ gogudb_partition_table._callbacks_6_abc
+(1 row)
+
+SELECT add_range_partition('callbacks.abc', 501, 602);
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_7_abc", "range_max": "602", "range_min": "501", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+           add_range_partition           
+-----------------------------------------
+ gogudb_partition_table._callbacks_7_abc
+(1 row)
+
+SELECT drop_partitions('callbacks.abc');
+NOTICE:  0 rows copied from gogudb_partition_table._callbacks_1_abc
+NOTICE:  1 rows copied from gogudb_partition_table._callbacks_2_abc
+NOTICE:  1 rows copied from gogudb_partition_table._callbacks_3_abc
+NOTICE:  1 rows copied from gogudb_partition_table._callbacks_4_abc
+NOTICE:  0 rows copied from gogudb_partition_table._callbacks_5_abc
+NOTICE:  0 rows copied from gogudb_partition_table._callbacks_6_abc
+NOTICE:  0 rows copied from gogudb_partition_table._callbacks_7_abc
+ drop_partitions 
+-----------------
+               7
+(1 row)
+
+/* set callback to be called on HASH partitions */
+SELECT set_init_callback('callbacks.abc',
+						 'callbacks.abc_on_part_created_callback(jsonb)');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+SELECT create_hash_partitions('callbacks.abc', 'a', 5);
+WARNING:  callback arg: {"parent": "abc", "parttype": "1", "partition": "_callbacks_0_abc", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+WARNING:  callback arg: {"parent": "abc", "parttype": "1", "partition": "_callbacks_1_abc", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+WARNING:  callback arg: {"parent": "abc", "parttype": "1", "partition": "_callbacks_2_abc", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+WARNING:  callback arg: {"parent": "abc", "parttype": "1", "partition": "_callbacks_3_abc", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+WARNING:  callback arg: {"parent": "abc", "parttype": "1", "partition": "_callbacks_4_abc", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+ create_hash_partitions 
+------------------------
+                      5
+(1 row)
+
+DROP TABLE callbacks.abc CASCADE;
+NOTICE:  drop cascades to 5 other objects
+/* test the temprary deletion of callback function */
+CREATE TABLE callbacks.abc(a serial, b int);
+SELECT set_init_callback('callbacks.abc',
+						 'callbacks.abc_on_part_created_callback(jsonb)');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+SELECT create_range_partitions('callbacks.abc', 'a', 1, 100, 2);
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_1_abc", "range_max": "101", "range_min": "1", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_2_abc", "range_max": "201", "range_min": "101", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+INSERT INTO callbacks.abc VALUES (201, 0); /* +1 new partition */
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_3_abc", "range_max": "301", "range_min": "201", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+BEGIN;
+DROP FUNCTION callbacks.abc_on_part_created_callback(jsonb);
+INSERT INTO callbacks.abc VALUES (301, 0); /* +0 new partitions (ERROR) */
+ERROR:  callback function "callbacks.abc_on_part_created_callback(jsonb)" does not exist
+ROLLBACK;
+INSERT INTO callbacks.abc VALUES (301, 0); /* +1 new partition */
+WARNING:  callback arg: {"parent": "abc", "parttype": "2", "partition": "_callbacks_5_abc", "range_max": "401", "range_min": "301", "parent_schema": "callbacks", "partition_schema": "gogudb_partition_table"}
+DROP TABLE callbacks.abc CASCADE;
+NOTICE:  drop cascades to 5 other objects
+/* more complex test using rotation of tables */
+CREATE TABLE callbacks.abc(a INT4 NOT NULL);
+INSERT INTO callbacks.abc
+	SELECT a FROM generate_series(1, 100) a;
+SELECT create_range_partitions('callbacks.abc', 'a', 1, 10, 10);
+ create_range_partitions 
+-------------------------
+                      10
+(1 row)
+
+CREATE OR REPLACE FUNCTION callbacks.rotation_callback(params jsonb)
+RETURNS VOID AS
+$$
+DECLARE
+	relation	regclass;
+	parent_rel	regclass;
+BEGIN
+	parent_rel := concat(params->>'parent_schema', '.', params->>'parent')::regclass;
+
+	-- drop "old" partitions
+	FOR relation IN (SELECT partition FROM
+						(SELECT partition, range_min::INT4 FROM gogudb_partition_list
+						 WHERE parent = parent_rel
+						 ORDER BY range_min::INT4 DESC
+						 OFFSET 4) t  -- remain 4 last partitions
+					 ORDER BY range_min)
+	LOOP
+		RAISE NOTICE 'dropping partition %', relation;
+		PERFORM drop_range_partition(relation);
+	END LOOP;
+END
+$$ LANGUAGE plpgsql;
+SELECT * FROM gogudb_partition_list
+WHERE parent = 'callbacks.abc'::REGCLASS
+ORDER BY range_min::INT4;
+    parent     |                partition                 | parttype | expr | range_min | range_max 
+---------------+------------------------------------------+----------+------+-----------+-----------
+ callbacks.abc | gogudb_partition_table._callbacks_1_abc  |        2 | a    | 1         | 11
+ callbacks.abc | gogudb_partition_table._callbacks_2_abc  |        2 | a    | 11        | 21
+ callbacks.abc | gogudb_partition_table._callbacks_3_abc  |        2 | a    | 21        | 31
+ callbacks.abc | gogudb_partition_table._callbacks_4_abc  |        2 | a    | 31        | 41
+ callbacks.abc | gogudb_partition_table._callbacks_5_abc  |        2 | a    | 41        | 51
+ callbacks.abc | gogudb_partition_table._callbacks_6_abc  |        2 | a    | 51        | 61
+ callbacks.abc | gogudb_partition_table._callbacks_7_abc  |        2 | a    | 61        | 71
+ callbacks.abc | gogudb_partition_table._callbacks_8_abc  |        2 | a    | 71        | 81
+ callbacks.abc | gogudb_partition_table._callbacks_9_abc  |        2 | a    | 81        | 91
+ callbacks.abc | gogudb_partition_table._callbacks_10_abc |        2 | a    | 91        | 101
+(10 rows)
+
+SELECT set_init_callback('callbacks.abc',
+						 'callbacks.rotation_callback(jsonb)');
+ set_init_callback 
+-------------------
+ 
+(1 row)
+
+INSERT INTO callbacks.abc VALUES (1000);
+NOTICE:  dropping partition gogudb_partition_table._callbacks_1_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_2_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_3_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_4_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_5_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_6_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_7_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_8_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_9_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_10_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_11_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_12_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_13_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_14_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_15_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_16_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_17_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_18_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_19_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_20_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_21_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_22_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_23_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_24_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_25_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_26_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_27_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_28_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_29_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_30_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_31_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_32_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_33_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_34_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_35_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_36_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_37_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_38_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_39_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_40_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_41_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_42_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_43_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_44_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_45_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_46_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_47_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_48_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_49_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_50_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_51_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_52_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_53_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_54_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_55_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_56_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_57_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_58_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_59_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_60_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_61_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_62_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_63_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_64_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_65_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_66_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_67_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_68_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_69_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_70_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_71_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_72_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_73_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_74_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_75_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_76_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_77_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_78_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_79_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_80_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_81_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_82_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_83_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_84_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_85_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_86_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_87_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_88_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_89_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_90_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_91_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_92_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_93_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_94_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_95_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_96_abc
+INSERT INTO callbacks.abc VALUES (1500);
+NOTICE:  dropping partition gogudb_partition_table._callbacks_97_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_98_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_99_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_100_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_101_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_102_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_103_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_104_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_105_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_106_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_107_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_108_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_109_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_110_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_111_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_112_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_113_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_114_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_115_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_116_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_117_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_118_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_119_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_120_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_121_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_122_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_123_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_124_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_125_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_126_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_127_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_128_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_129_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_130_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_131_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_132_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_133_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_134_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_135_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_136_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_137_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_138_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_139_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_140_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_141_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_142_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_143_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_144_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_145_abc
+NOTICE:  dropping partition gogudb_partition_table._callbacks_146_abc
+SELECT * FROM gogudb_partition_list
+WHERE parent = 'callbacks.abc'::REGCLASS
+ORDER BY range_min::INT4;
+    parent     |                 partition                 | parttype | expr | range_min | range_max 
+---------------+-------------------------------------------+----------+------+-----------+-----------
+ callbacks.abc | gogudb_partition_table._callbacks_147_abc |        2 | a    | 1461      | 1471
+ callbacks.abc | gogudb_partition_table._callbacks_148_abc |        2 | a    | 1471      | 1481
+ callbacks.abc | gogudb_partition_table._callbacks_149_abc |        2 | a    | 1481      | 1491
+ callbacks.abc | gogudb_partition_table._callbacks_150_abc |        2 | a    | 1491      | 1501
+(4 rows)
+
+DROP TABLE callbacks.abc CASCADE;
+NOTICE:  drop cascades to 5 other objects
+DROP SCHEMA callbacks CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DROP EXTENSION gogudb CASCADE;

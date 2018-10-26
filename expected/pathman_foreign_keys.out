@@ -1,0 +1,95 @@
+\set VERBOSITY terse
+SET search_path = 'public','_gogu';
+CREATE EXTENSION gogudb;
+CREATE SCHEMA fkeys;
+/* Check primary keys generation */
+CREATE TABLE fkeys.test_ref(comment TEXT UNIQUE);
+INSERT INTO fkeys.test_ref VALUES('test');
+CREATE TABLE fkeys.test_fkey(
+	id			INT NOT NULL,
+	comment		TEXT,
+	FOREIGN KEY (comment) REFERENCES fkeys.test_ref(comment));
+INSERT INTO fkeys.test_fkey SELECT generate_series(1, 1000), 'test';
+SELECT create_range_partitions('fkeys.test_fkey', 'id', 1, 100);
+ create_range_partitions 
+-------------------------
+                      10
+(1 row)
+
+INSERT INTO fkeys.test_fkey VALUES(1, 'wrong');
+ERROR:  insert or update on table "_fkeys_1_test_fkey" violates foreign key constraint "_fkeys_1_test_fkey_comment_fkey"
+INSERT INTO fkeys.test_fkey VALUES(1, 'test');
+SELECT drop_partitions('fkeys.test_fkey');
+NOTICE:  101 rows copied from gogudb_partition_table._fkeys_1_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_2_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_3_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_4_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_5_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_6_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_7_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_8_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_9_test_fkey
+NOTICE:  100 rows copied from gogudb_partition_table._fkeys_10_test_fkey
+ drop_partitions 
+-----------------
+              10
+(1 row)
+
+SELECT create_hash_partitions('fkeys.test_fkey', 'id', 10);
+ create_hash_partitions 
+------------------------
+                     10
+(1 row)
+
+INSERT INTO fkeys.test_fkey VALUES(1, 'wrong');
+ERROR:  insert or update on table "_fkeys_5_test_fkey" violates foreign key constraint "_fkeys_5_test_fkey_comment_fkey"
+INSERT INTO fkeys.test_fkey VALUES(1, 'test');
+SELECT drop_partitions('fkeys.test_fkey');
+NOTICE:  98 rows copied from gogudb_partition_table._fkeys_0_test_fkey
+NOTICE:  113 rows copied from gogudb_partition_table._fkeys_1_test_fkey
+NOTICE:  98 rows copied from gogudb_partition_table._fkeys_2_test_fkey
+NOTICE:  105 rows copied from gogudb_partition_table._fkeys_3_test_fkey
+NOTICE:  96 rows copied from gogudb_partition_table._fkeys_4_test_fkey
+NOTICE:  102 rows copied from gogudb_partition_table._fkeys_5_test_fkey
+NOTICE:  103 rows copied from gogudb_partition_table._fkeys_6_test_fkey
+NOTICE:  92 rows copied from gogudb_partition_table._fkeys_7_test_fkey
+NOTICE:  93 rows copied from gogudb_partition_table._fkeys_8_test_fkey
+NOTICE:  102 rows copied from gogudb_partition_table._fkeys_9_test_fkey
+ drop_partitions 
+-----------------
+              10
+(1 row)
+
+/* Try to partition table that's being referenced */
+CREATE TABLE fkeys.messages(
+	id			SERIAL PRIMARY KEY,
+	msg			TEXT);
+CREATE TABLE fkeys.replies(
+	id			SERIAL PRIMARY KEY,
+	message_id	INTEGER REFERENCES fkeys.messages(id),
+	msg			TEXT);
+INSERT INTO fkeys.messages SELECT g, md5(g::text) FROM generate_series(1, 10) as g;
+INSERT INTO fkeys.replies SELECT g, g, md5(g::text) FROM generate_series(1, 10) as g;
+SELECT create_range_partitions('fkeys.messages', 'id', 1, 100, 2); /* not ok */
+WARNING:  foreign key "replies_message_id_fkey" references table "fkeys.messages"
+ERROR:  table "fkeys.messages" is referenced from other tables
+ALTER TABLE fkeys.replies DROP CONSTRAINT replies_message_id_fkey;
+SELECT create_range_partitions('fkeys.messages', 'id', 1, 100, 2); /* ok */
+ create_range_partitions 
+-------------------------
+                       2
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT * FROM fkeys.messages;
+             QUERY PLAN              
+-------------------------------------
+ Append
+   ->  Seq Scan on _fkeys_1_messages
+   ->  Seq Scan on _fkeys_2_messages
+(3 rows)
+
+DROP TABLE fkeys.messages, fkeys.replies CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DROP SCHEMA fkeys CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DROP EXTENSION gogudb CASCADE;
