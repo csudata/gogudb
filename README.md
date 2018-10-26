@@ -15,7 +15,6 @@
 相比传统中间件方式,GoguDB的实现方法则可靠许多。因为GoguDB本身就是部署在数据库上面，所以，面对跨节点join的需求，GoguDB会把需要join的表的信息先从底层数据库中取出并临时存放在GoguDB所在的数据库中，在GoguDB节点上进行join操作，然后将结果返回给上层应用。相比于传统中间件,GoguDB不需要对数据库集群搞一个特殊的全局表，所以，传统中间件在跨节点join存在的种种问题，在GoguDB中自然不复存在。
  
 ### GoGuDB架构图
-![Alt text](./1536652687867.png)
 ![Image text](https://github.com/hangzhou-cstech/gogudb/blob/master/image/gogudb_01.jpg)
 
 GoguDB本质上是一个插件，部署起来仅需要安装并简单配置一下，相比于传统的“重量级”中间件，GoguDB显得灵活许多。
