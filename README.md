@@ -1,5 +1,7 @@
 # 开源分布式数据库GoGuDB
 >当下分布式数据库架构百花齐放，我们一直所追求一种架构使用起来与单机无太大差异，GoGuDB是基于PostgreSQL的分布式数据库，在SQL语句上能支持所有SQL语句查询性能上我们做了大量优化工作，下一步工作是实现自动扩容、和分布式事务
+> 项目中我们借助了pg_pathman实现高效分区:https://github.com/postgrespro/pg_pathman
+
 
 
 ## 有何优势？
