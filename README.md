@@ -16,7 +16,7 @@
  
 ### GoGuDB架构图
 ![Alt text](./1536652687867.png)
-![Image text](https://github.com/hangzhou-cstech/gogudb/image/gogudb_01.jpg)
+![Image text](https://github.com/hangzhou-cstech/gogudb/blob/master/image/gogudb_01.jpg)
 
 GoguDB本质上是一个插件，部署起来仅需要安装并简单配置一下，相比于传统的“重量级”中间件，GoguDB显得灵活许多。
 区别于传统的中间件GoguDB将分片的配置信息存放在GoguDB所在数据节点的一些表中，在配置分片信息时，只需要配置几条SQL就可以了，而且相关配置表结构简单，关系明朗，很容易理解并上手。
