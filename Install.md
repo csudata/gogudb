@@ -1,16 +1,16 @@
-#gogudb 使用手册 1.1 版
+# gogudb 使用手册 1.1 版
 这是1.1版本的用户手册，主要内容包括：安装部署、使用接口以及使用案例三部分。
-##安装部署
-###安装前提
+## 安装部署
+### 安装前提
 在安装gogudb之前，需要安装PG，安装PG的方式不限，但是需要的PG大版本是9.6或是10。目前gogudb支持的OS版本是centOS 7以上，并且该系统上安装了make这个工具（centos上默认自带了这个工具）。
 在安装PG之后，需要设置环境变量，将pg的bin目录加入到path中来，使得shell能直接使用pg_config命令
-###安装二进制包
+### 安装二进制包
 * 获取最新的二进制包，根据当前的OS、PG版本获取。
 * 使用tar命令将其解压缩
 * 解压之后，进入二进制包的所在目录，使用相应的权限执行make install命令，改命令会将so文件、sql文件、control复制到对应目录。注意：如果PG的版本和gogudb要求的PG版本不匹配，会报错，从而安装失败
 
-###配置gogudb
-####编辑PG的配置文件
+### 配置gogudb
+#### 编辑PG的配置文件
 vi /path_to/postgresql.conf 在配置文件中增加两行：
 
 ```
@@ -26,16 +26,16 @@ allow_system_table_mods=on
 **注意，上面这个在1.0版本中是必须修改的，对于1.1版本不需要这个。因为gogudb的在1.0版本存储过程和系统表都装在了pg_catalog下，如果不修改，会报错，而1.1版本后，存储过程和系统表改到了\_gogu这个schema下了**
 
 在修改了配置文件之后，需要重启该数据库的实例。
-####配置gogudb的license
+#### 配置gogudb的license
 如果是试用版本的gogudb，不需要执行下面的步骤。
 目前，gogudb的license文件完整目录为：/etc/gogudb.license，gogudb在PG启动时，会去读取该文件来校验license，如果不通过，PG是无法启动的。
 
-###创建gogudb
+### 创建gogudb
 在gogudb的数据库启动之后，运行 create externsion gogudb，即可完成gogudb的创建
 
-##使用接口
+## 使用接口
 gogudb向用户提供了两大功能：一，创建远程数据源；二，配置分表规则；三，配置远程数据源的hash值区间。用户需要首先借助gogudb提供的gogudb_fdw来创建远程数据源，创建之后，用户在建表之前根据分表规则，需要向配置表里设置表的分表规则。当用户创建表的时候，gogudb会根据分表规则创建若干分片，并均分到各个远程数据源上。当创建基于HASH的分区表之前，用户需要配置远程数据源的hash值区间，创建之后，调用相应函数生效，然后就可以创建HASH方式的分区表了，否则会报错。
-###创建远程数据源
+### 创建远程数据源
 * 使用create server语句创建数据源，例如：
 
 ```
@@ -51,7 +51,7 @@ create user mapping for current_user    server server_remote1 options(user 'pgsq
 
 设置当前用户访问server_remote1时，使用的登录用户是pgsql，密码为空。
 
-###配置表的分表规则
+### 配置表的分表规则
 gogudb中有一张表 table_partition_rule（1.0版本在pg_catalog这个schema下，而1.1移到了\_gogu这个schema下）定义了用户分表的规则，在创建分区表之前，用户需要在表中插入数据。在创建表的时候，gogudb会根据改变预先定义的规则，来创建分区表。该表主要包括下列字段：
 * schema_name 类型TEXT NOT NULL，指定即将创建的父表所在的schema
 * table_name 类型TEXT NOT NULL，指定即将创建的父表的名称，
@@ -63,7 +63,7 @@ gogudb中有一张表 table_partition_rule（1.0版本在pg_catalog这个schema�
 * remote_schema 类型 TEXT DEFAULT NULL，子表在远程数据源上的schema，默认为public
 * servers 类型TEXT[] DEFAULT NULL，子表分布的远程数据源名称列表，默认是系统内所有使用gogudb_fdw的远程的数据源列表。
 
-###配置远程数据源的HASH值区间
+### 配置远程数据源的HASH值区间
 gogudb中有一张表 server_map（1.0版本在pg_catalog这个schema下，而1.1移到了\_gogu这个schema下）定义了做hash值的范围和远程数据源的关系，这张表主要有下面三个字段：
 * server_name, TEXT NOT NULL类型，子表分布的远程数据源名称列表，默认是系统内所有使用gogudb_fdw的远程的数据源列表。
 * range_start，smallint NOT NULL类型，hash值范围的起始值（包括该值），最小为0；
@@ -74,9 +74,9 @@ gogudb中有一张表 server_map（1.0版本在pg_catalog这个schema下，而1.
 select reload_range_server_set()
 ```
 来重新加载server_map表的数据，使之生效。
-##使用案例
+## 使用案例
 
-###准备测试环境的数据库实例
+### 准备测试环境的数据库实例
 环境如下：
 
 <table>
@@ -90,7 +90,7 @@ select reload_range_server_set()
 
 其中gogu01作为googudb的运行实例，pg01和pg02作为gogudb的远程数据源
 
-####配置gogudb
+#### 配置gogudb
 编辑gogu01机器上（即gogudb）数据库的配置文件： vi /data/pgdata/postgresql.conf 在配置文件中增加一行：
 
 ```
@@ -102,16 +102,16 @@ shared_preload_libraries='gogudb'
 allow_system_table_mods=on
 ```
 
-###安装gogudb
+### 安装gogudb
 使用前面描述的方法，获得gogudb的二进制包之后使用make install安装
-###启动数据库：
+### 启动数据库：
 启动gogudb数据库：
 
 ```
 pg_ctl start -D /data/pgdata
 ```
 
-###创建extension
+### 创建extension
 
 需要在gogudb的数据库中创建gogudb的extension
 * 连接gogudb数据库：
@@ -122,7 +122,7 @@ psql -d postgres
 create extension gogudb;
 ```
 
-###创建远程数据源
+### 创建远程数据源
 创建两个数据源，分别指向拍pg01和pg02:
 * 连接gogudb数据库： psql -d postgres
 * 创建名为server_remote1的数据源：CREATE SERVER server_remote1 FOREIGN DATA WRAPPER gogudb_fdw OPTIONS(host '192.168.3.41',port '5432',dbname 'postgres');
@@ -294,7 +294,7 @@ drop cascades to foreign table gogudb_partition_table._public_4_part_range_num_t
 drop table part_hash_test cascade;
 ```
 
-##注意事项
+## 注意事项
 license文件的目录不要错，license的内容找唐总，宏宇，和老余。
 区分gogudb是否是试用版，可以在数据启动之后，执行：
 
