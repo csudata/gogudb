@@ -8,7 +8,7 @@
 * 获取最新的二进制包，根据当前的OS、PG版本获取。
 * 使用tar命令将其解压缩
 * 解压之后，进入二进制包的所在目录，使用相应的权限执行make install命令，改命令会将so文件、sql文件、control复制到对应目录。注意：如果PG的版本和gogudb要求的PG版本不匹配，会报错，从而安装失败
-
+* 详细源码安装请参照[source_gogudb_install.md](https://github.com/hangzhou-cstech/gogudb/blob/master/gogudb_source_install.md)
 ### 配置gogudb
 #### 编辑PG的配置文件
 vi /path_to/postgresql.conf 在配置文件中增加两行：
