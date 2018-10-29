@@ -117,7 +117,7 @@ BEGIN
 	END IF;
 
 	IF server_list IS NULL THEN
-		get_server_sql := 'select * from fdw_server';
+		get_server_sql := 'select * from @extschema@.fdw_server';
 		FOR server IN EXECUTE get_server_sql LOOP
 		server_set := server_set|| server.srvname::TEXT;
                 END LOOP;
@@ -221,7 +221,7 @@ BEGIN
 	END IF;
 
 	IF server_list IS NULL THEN
-		get_server_sql := 'select * from fdw_server';
+		get_server_sql := 'select * from @extschema@.fdw_server';
 		FOR server IN EXECUTE get_server_sql LOOP
 		server_set := server_set|| server.srvname::TEXT;
                 END LOOP;
