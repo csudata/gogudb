@@ -121,7 +121,6 @@ create extension gogudb;
 insert into _gogu.server_map values('server_remote1', 0, 64), ('server_remote2', 64, 128);
 select _gogu.reload_range_server_set();
 ```
-**注意对于1.0版本，上面的函数和表名前不需要加“\_gogu.”**
 这就配置并生效了两台远程数据源server_remote1和server_remote2，server_remote1接受的hash值范围是[0,64), server_remote2接受的范围是[64,128)。
 
 ### 使用hash方式创建分区表
