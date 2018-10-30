@@ -37,7 +37,7 @@ Child tables: partitioned_table_0,
 ```
 * 测试SQL通过性列表
 |SQL|是否通过|
-|:-|:-|
+|-|-|
 |alter table partitioned_table add column name text;|是|
 |alter table partitioned_table alter column name type varchar(30);|是|
 |select max(id) from partitioned_table;|是|
