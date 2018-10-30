@@ -2,7 +2,7 @@ MODULE_big = gogudb
 
 EXTENSION = gogudb
 
-EXTVERSION = 1.0
+EXTVERSION = 1.1
 
 target_version = 10
 
