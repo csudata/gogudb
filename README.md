@@ -36,6 +36,7 @@ Child tables: partitioned_table_0,
               partitioned_table_3
 ```
 * 测试SQL通过性列表
+
 |SQL|是否通过|
 |-|-|
 |alter table partitioned_table add column name text;|是|
@@ -61,6 +62,7 @@ Child tables: partitioned_table_0,
 |copy partitioned_table from '/tmp/a.txt';|否|
 |SELECT * FROM part_hash_test WHERE id>avg(id);|否|
 |SELECT * FROM part_hash_test WHERE id>(select avg(id) from part_hash_test);|是|
+
 ## 快速上手
 
 * 安装配置手册:https://github.com/hangzhou-cstech/gogudb/blob/master/Install.md
