@@ -11,7 +11,7 @@
 * 详细源码安装请参照https://github.com/hangzhou-cstech/gogudb/blob/master/gogudb_source_install.md
 ### 配置gogudb
 #### 编辑PG的配置文件
-vi /path_to/postgresql.conf 在配置文件中增加两行：
+vi /path_to/postgresql.conf 在配置文件中增加一行：
 
 ```
 shared_preload_libraries='gogudb'
@@ -85,10 +85,6 @@ select reload_range_server_set()
 shared_preload_libraries='gogudb'
 ```
 
-对于1.0版本还需要加：
-```
-allow_system_table_mods=on
-```
 
 ### 安装gogudb
 使用前面描述的方法，获得gogudb的二进制包之后使用make install安装
@@ -183,7 +179,6 @@ DROP TABLE
 ```
 insert into  _gogu.table_partition_rule(schema_name ,table_name ,part_expr ,part_type ,range_interval ,range_start ,part_dist, remote_schema) values('public', 'part_range_test', 'crt_time', 2, '2 month','2018-1-1 00:00:0', 6, 'public');
 ```
-**注意对于1.0版本，上面的函数和表名前不需要加“\_gogu.”**
 
 这个指定即将创建表的schema是pulic，表名是part_range_test，分表会使用的表达式是'crt_time，实际将会是一个timestamp类型的字段，分区的类型是range方式，分区间隔是'2 month'，起始值是'2018-1-1 00:00:0'，会创建6个分片，分片位于所有数据源上，schema为public。
 *创建表：
@@ -243,7 +238,6 @@ DROP TABLE
 ```
 insert into _gogu.table_partition_rule(schema_name, table_name, part_expr, part_type, part_dist, remote_schema, range_interval,range_start) values('public','part_range_num_test', 'id', 2, 4, 'public', '100', '0');
 ```
-**注意对于1.0版本，上面的函数和表名前不需要加“\_gogu.”**
 
 指定即将创建表的schema是pulic，表名是part_range_num_test，分表会使用的表达式是id，实际将会是一个int类型的字段，分区的类型是range方式，分区间隔是'100'，起始值是'0'，会创建4个分片，分片位于所有数据源上，schema为public。
 
