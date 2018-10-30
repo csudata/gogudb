@@ -40,7 +40,7 @@ create user mapping for current_user    server server_remote1 options(user 'pgsq
 设置当前用户访问server_remote1时，使用的登录用户是pgsql，密码为空。
 
 ### 配置表的分表规则
-gogudb中有一张表 table_partition_rule（1.0版本在pg_catalog这个schema下，而1.1移到了\_gogu这个schema下）定义了用户分表的规则，在创建分区表之前，用户需要在表中插入数据。在创建表的时候，gogudb会根据改变预先定义的规则，来创建分区表。该表主要包括下列字段：
+gogudb中有一张表 table_partition_rule定义了用户分表的规则，在创建分区表之前，用户需要在表中插入数据。在创建表的时候，gogudb会根据改变预先定义的规则，来创建分区表。该表主要包括下列字段：
 * schema_name 类型TEXT NOT NULL，指定即将创建的父表所在的schema
 * table_name 类型TEXT NOT NULL，指定即将创建的父表的名称，
 * part_expr  类型TEXTTEXT NOT NULL，指定分表时使用的表达式（最简单的就是列名）
@@ -52,7 +52,7 @@ gogudb中有一张表 table_partition_rule（1.0版本在pg_catalog这个schema�
 * servers 类型TEXT[] DEFAULT NULL，子表分布的远程数据源名称列表，默认是系统内所有使用gogudb_fdw的远程的数据源列表。
 
 ### 配置远程数据源的HASH值区间
-gogudb中有一张表 server_map（1.0版本在pg_catalog这个schema下，而1.1移到了\_gogu这个schema下）定义了做hash值的范围和远程数据源的关系，这张表主要有下面三个字段：
+gogudb中有一张表 server_map定义了做hash值的范围和远程数据源的关系，这张表主要有下面三个字段：
 * server_name, TEXT NOT NULL类型，子表分布的远程数据源名称列表，默认是系统内所有使用gogudb_fdw的远程的数据源列表。
 * range_start，smallint NOT NULL类型，hash值范围的起始值（包括该值），最小为0；
 * range_end，smallint NOT NULL类型，hash值范围的结束值（不包括该值），不小于range_start，不大于128；
@@ -131,7 +131,6 @@ select _gogu.reload_range_server_set();
 ```
 insert into _gogu.table_partition_rule(schema_name, table_name, part_expr, part_type, part_dist, remote_schema) values('public', 'part_hash_test', 'id', 1,4,'public');
 ```
-**注意对于1.0版本，上面的表名前不需要加“\_gogu.”**
 
 插入的记录指定了：将会在public的schema下创建一张表，表的分布字段是id，采用hash分区，总共4个分片，分片将分布到所有的gogudb_fdw的远程的数据源列表上，所在的schema为public
 * 创建分区表：
