@@ -23,4 +23,4 @@ GoguDB本质上是一个插件，部署起来仅需要安装并简单配置一�
 ## 快速上手
 
 * 安装配置手册:https://github.com/hangzhou-cstech/gogudb/blob/master/Install.md
-
+* 获取二进制包:https://github.com/hangzhou-cstech/gogudb_binary_download
