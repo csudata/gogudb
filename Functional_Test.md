@@ -1,4 +1,4 @@
-##功能性测试
+## 功能性测试
 * 测试表结构
 ```
 postgres=# \d+ partitioned_table
