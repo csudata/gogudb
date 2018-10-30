@@ -60,7 +60,6 @@ Child tables: partitioned_table_0,
 |insert into partitioned_table values(11,0.35,'cstech');|是|
 |copy (select * from partitioned_table) to '/tmp/test.csv';|是|
 |copy partitioned_table from '/tmp/a.txt';|否|
-|SELECT * FROM part_hash_test WHERE id>avg(id);|否|
 |SELECT * FROM part_hash_test WHERE id>(select avg(id) from part_hash_test);|是|
 
 ## 快速上手
