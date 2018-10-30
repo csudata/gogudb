@@ -8,7 +8,7 @@
 * 获取最新的二进制包，根据当前的OS、PG版本获取。
 * 使用tar命令将其解压缩
 * 解压之后，进入二进制包的所在目录，使用相应的权限执行make install命令，改命令会将so文件、sql文件、control复制到对应目录。注意：如果PG的版本和gogudb要求的PG版本不匹配，会报错，从而安装失败
-* 详细源码安装请参照[source_gogudb_install.md](https://github.com/hangzhou-cstech/gogudb/blob/master/gogudb_source_install.md)
+* 详细源码安装请参照https://github.com/hangzhou-cstech/gogudb/blob/master/gogudb_source_install.md
 ### 配置gogudb
 #### 编辑PG的配置文件
 vi /path_to/postgresql.conf 在配置文件中增加两行：
@@ -16,19 +16,7 @@ vi /path_to/postgresql.conf 在配置文件中增加两行：
 ```
 shared_preload_libraries='gogudb'
 ```
-
-**注意，这个是必须修改的，否则回头无法创建gogudb的externsion**
-
-```
-allow_system_table_mods=on
-```
-
-**注意，上面这个在1.0版本中是必须修改的，对于1.1版本不需要这个。因为gogudb的在1.0版本存储过程和系统表都装在了pg_catalog下，如果不修改，会报错，而1.1版本后，存储过程和系统表改到了\_gogu这个schema下了**
-
 在修改了配置文件之后，需要重启该数据库的实例。
-#### 配置gogudb的license
-如果是试用版本的gogudb，不需要执行下面的步骤。
-目前，gogudb的license文件完整目录为：/etc/gogudb.license，gogudb在PG启动时，会去读取该文件来校验license，如果不通过，PG是无法启动的。
 
 ### 创建gogudb
 在gogudb的数据库启动之后，运行 create externsion gogudb，即可完成gogudb的创建
@@ -295,17 +283,4 @@ drop table part_hash_test cascade;
 ```
 
 ## 注意事项
-license文件的目录不要错，license的内容找唐总，宏宇，和老余。
-区分gogudb是否是试用版，可以在数据启动之后，执行：
-
-```
-postgres=# select get_gogudb_lib_version();
- get_gogudb_lib_version 
-------------------------
- 10000_eva_version
-(1 row)
-```
-
-这事就是试用版的输出。否则是商业版。
-
 目前可以在父表执行的操作有：create index，drop index，vacuum，reindex， cluster，truncate only等，不能执行的操作有：rename 父表，rename 子表，rename子表使用的远程表，不能rename partition_table_rule中使用的schema，不能修改子表、或是远程表中表名，不能drop 子表或是远程表。此外，也不支持分区的合并与分裂、以及读写分离。
