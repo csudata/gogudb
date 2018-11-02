@@ -9,7 +9,6 @@
 这里选择yum方式安装
 
 ```
-
 [root@bogon ~]# yum -y install ipvsadm
 
 已加载插件：fastestmirror
@@ -33,7 +32,6 @@ Determining fastest mirrors
 
 
 完毕！
-
 ```
 
 * 查看ipvs模块是否加载
@@ -47,7 +45,6 @@ Determining fastest mirrors
 * 因为此时系统还没有把ipvs模块加载进系统，需要我们执行ipvsadm命令才会加载进去或者modprobe ip_vs
 
 ```
-
 [root@bogon ~]# ipvsadm
 
 IP Virtual Server version 1.2.1 (size=4096)
@@ -65,13 +62,11 @@ libcrc32c 1246 1 ip_vs
 ipv6 336282 270 ip_vs,ip6t_REJECT,nf_conntrack_ipv6,nf_defrag_ipv6
 
 [root@bogon ~]#
-
 ```
 
 ## 三、手动配置LVS负载均衡器
 
 ```
-
 [root@bogon ~]# ifconfig eth1:1 192.168.2.17 netmask 255.255.255.0
 [root@bogon ~]# route add -host 192.168.2.17 dev eth1
 ```
@@ -79,7 +74,6 @@ ipv6 336282 270 ip_vs,ip6t_REJECT,nf_conntrack_ipv6,nf_defrag_ipv6
 * ipvsadm命令参数：
 
 ```
-
 -A    
 
 -A --add-service 添加一个带选项的虚拟服务。
@@ -119,13 +113,11 @@ Delete a virtual service, alongwith any associated real servers.
 -C, --clear Clear the virtual server table清空lvs原有的配置。
 
 -set 设置tcp tcpfn udp 的连接超时时间（一般来说高并发的时候小一点点。)
-
 ```
 
 * ipvsadm添加lvs服务
 
 ```
-
 [root@bogon ~]# ipvsadm -C
 
 [root@bogon ~]# ipvsadm -A -t 192.168.2.17:80 -s rr　　#添加虚拟服务指定VIP
@@ -149,15 +141,12 @@ TCP 192.168.2.17:80 rr
   -> 192.168.2.204:80 Route 1 0 0         
 
   -> 192.168.2.205:80 Route 1 0 0
-
 ```
 
 * LB上删除虚拟服务
 
 ```
-
 ipvsadm -D -t 192.168.2.17:80 
-
 ```
 
 # 四、RS节点服务器手动配置
@@ -165,7 +154,6 @@ ipvsadm -D -t 192.168.2.17:80
 * 添加lo端口的VIP&路由
 
 ```
-
 [root@bogon ~]# ifconfig lo:0 192.168.2.17 netmask 255.255.255.255　　(由于RS的VIP不是用来通讯，并且这里一定要设置24位掩码）
 [root@bogon ~]# route add -host 192.168.2.17 dev lo
 ```
@@ -173,10 +161,8 @@ ipvsadm -D -t 192.168.2.17:80
 * 配置ARP抑制
 
 ```
-
 [root@bogon ~]# echo "1" > /proc/sys/net/ipv4/conf/lo/arp_ignore 
 [root@bogon ~]# echo "2" > /proc/sys/net/ipv4/conf/lo/arp_announce 
 [root@bogon ~]# echo "1" > /proc/sys/net/ipv4/conf/all/arp_announce 
 [root@bogon ~]# echo "2" > /proc/sys/net/ipv4/conf/all/arp_ignore
 ```
-
