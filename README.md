@@ -24,7 +24,7 @@ GoguDB本质上是一个插件，部署起来仅需要安装并简单配置一�
 
 * 安装配置手册:https://github.com/hangzhou-cstech/gogudb/blob/master/Install.md
 * 获取二进制包:https://github.com/hangzhou-cstech/gogudb_binary_download
-* lvs配置手册：https://github.com/hangzhou-cstech/gogudb/blob/master/lvs_configuration.md
+* lvs DR模式配置手册：https://github.com/hangzhou-cstech/gogudb/blob/master/lvs_configuration.md
 * GoGuDB扩容手册：https://github.com/hangzhou-cstech/gogudb/blob/master/Expansion.md
 ## 功能性测试示例
 https://github.com/hangzhou-cstech/gogudb/blob/master/Functional_Test.md
